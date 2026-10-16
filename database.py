@@ -18,6 +18,26 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DB_PATH = os.path.join(BASE_DIR, "pos_local.db")
 
+# If pos_local.db does not exist in BASE_DIR (e.g. dist/FastPOS), check if pos_default.db or pos_local.db is available
+if not os.path.exists(DEFAULT_DB_PATH):
+    for candidate_name in ["pos_default.db", "pos_local.db"]:
+        cur_c = os.path.join(BASE_DIR, candidate_name)
+        if os.path.exists(cur_c) and cur_c != DEFAULT_DB_PATH:
+            try:
+                import shutil
+                shutil.copy2(cur_c, DEFAULT_DB_PATH)
+                break
+            except Exception:
+                pass
+        parent_c = os.path.join(os.path.dirname(BASE_DIR), candidate_name)
+        if os.path.exists(parent_c):
+            try:
+                import shutil
+                shutil.copy2(parent_c, DEFAULT_DB_PATH)
+                break
+            except Exception:
+                pass
+
 
 class DatabaseManager:
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -267,13 +287,27 @@ class DatabaseManager:
             candidates.append(m.group(1).strip())
         return [c for c in dict.fromkeys(candidates) if c]
 
+    def get_product_count(self) -> int:
+        """Returns total active products count in SQLite."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM products")
+            row = cursor.fetchone()
+            return row[0] if row else 0
+
     def get_product_by_code(self, code: str) -> Optional[Dict[str, Any]]:
-        """Lookup by barcode/SKU/ID/name (case-insensitive); supports QR payloads."""
+        """Lookup by barcode/SKU/ID/name (case-insensitive); supports QR payloads, exact, suffix, and prefix matching."""
         if not code:
             return None
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            for cand in self._extract_scan_code(code):
+            candidates = self._extract_scan_code(code)
+
+            # Pass 1: Exact match on barcode, SKU, ID, or Name
+            for cand in candidates:
+                cand_clean = cand.strip()
+                if not cand_clean:
+                    continue
                 cursor.execute("""
                     SELECT * FROM products 
                     WHERE LOWER(TRIM(barcode)) = LOWER(?) 
@@ -283,10 +317,41 @@ class DatabaseManager:
                     ORDER BY CASE WHEN LOWER(TRIM(barcode)) = LOWER(?) THEN 0
                                   WHEN LOWER(TRIM(sku)) = LOWER(?) THEN 1 ELSE 2 END
                     LIMIT 1
-                """, (cand, cand, cand, cand, cand, cand))
+                """, (cand_clean, cand_clean, cand_clean, cand_clean, cand_clean, cand_clean))
                 row = cursor.fetchone()
                 if row:
                     return dict(row)
+
+            # Pass 2: Suffix match (Very common for EAN-13 barcodes where internal item code is last 4-8 digits, e.g. 509061 -> 2001073509061)
+            for cand in candidates:
+                cand_clean = cand.strip()
+                if len(cand_clean) >= 4 and any(c.isalnum() for c in cand_clean):
+                    cursor.execute("""
+                        SELECT * FROM products 
+                        WHERE barcode LIKE ? 
+                           OR sku LIKE ?
+                        ORDER BY LENGTH(barcode) ASC
+                        LIMIT 1
+                    """, (f"%{cand_clean}", f"%{cand_clean}"))
+                    row = cursor.fetchone()
+                    if row:
+                        return dict(row)
+
+            # Pass 3: Prefix match (e.g. barcode starts with scanned code)
+            for cand in candidates:
+                cand_clean = cand.strip()
+                if len(cand_clean) >= 4 and any(c.isalnum() for c in cand_clean):
+                    cursor.execute("""
+                        SELECT * FROM products 
+                        WHERE barcode LIKE ? 
+                           OR sku LIKE ?
+                        ORDER BY LENGTH(barcode) ASC
+                        LIMIT 1
+                    """, (f"{cand_clean}%", f"{cand_clean}%"))
+                    row = cursor.fetchone()
+                    if row:
+                        return dict(row)
+
             return None
 
     def upsert_products(self, product_list: List[Dict[str, Any]]) -> int:

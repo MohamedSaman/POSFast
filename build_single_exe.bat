@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 echo.
 echo [Step 2/2] Packaging into a single standalone FastPOS.exe...
-pyinstaller --clean -y --onefile --windowed --icon=icon.ico --add-data="icon.png;." --add-data="icon.ico;." --hidden-import=PyQt6 --hidden-import=PyQt6.QtCore --hidden-import=PyQt6.QtGui --hidden-import=PyQt6.QtWidgets --hidden-import=PyQt6.QtPrintSupport --hidden-import=jinja2 --hidden-import=requests --hidden-import=barcode --hidden-import=barcode.codex --hidden-import=sqlite3 --name="FastPOS" main.py
+pyinstaller --clean -y --onefile --windowed --icon=icon.ico --add-data="icon.png;." --add-data="icon.ico;." --add-data="pos_default.db;." --hidden-import=PyQt6 --hidden-import=PyQt6.QtCore --hidden-import=PyQt6.QtGui --hidden-import=PyQt6.QtWidgets --hidden-import=PyQt6.QtPrintSupport --hidden-import=jinja2 --hidden-import=requests --hidden-import=barcode --hidden-import=barcode.codex --hidden-import=sqlite3 --name="FastPOS" main.py
 
 if errorlevel 1 (
     echo [ERROR] Compilation failed.

@@ -233,8 +233,50 @@ def run_tests():
     assert window.grand_total == Decimal("2.25")
     print("✓ Closed Tab 2: Automatically returned to Tab 1 with Customer A ready to finalize!")
 
+    # --- TEST 12: QR / Barcode Scan & Repeated Item Scan Behavior ---
+    print("\n--- TEST 12: QR / Barcode Suffix & Repeated Scan Flow ---")
+    # Insert test product with long barcode like 2001073509061
+    db.upsert_products([{
+        "id": 9999,
+        "sku": "PROD-TESTQR",
+        "barcode": "2001073509061",
+        "name": "Gold Pendant 22K",
+        "selling_price": 3000.0,
+        "stock_qty": 15.0
+    }])
+    
+    # Lookup by full barcode
+    p_full = db.get_product_by_code("2001073509061")
+    assert p_full is not None
+    assert p_full["name"] == "Gold Pendant 22K"
+    
+    # Lookup by suffix (509061) as scanned from Windows scanner
+    p_suffix = db.get_product_by_code("509061")
+    assert p_suffix is not None, "Suffix barcode lookup failed for 509061!"
+    assert p_suffix["id"] == 9999
+    assert p_suffix["name"] == "Gold Pendant 22K"
+    print("✓ Barcode suffix matching verified: '509061' successfully resolved to '2001073509061'")
+
+    # Test repeated scan on table
+    window.new_bill() # clean bill
+    assert window.table.rowCount() == 1
+    # Scan 1: First item added to row 0
+    window.table.on_product_selected(0, p_suffix)
+    assert window.table.item(0, COL_QTY).text() == "1"
+    # Row 1 is now blank ready for next item
+    assert window.table.rowCount() == 2
+    
+    # Scan 2: Same item scanned into row 1
+    window.table.on_product_selected(1, p_suffix)
+    # Row 0 quantity should be incremented to 2
+    assert window.table.item(0, COL_QTY).text() == "2"
+    # Row 1 product cell should be reset and empty (no lingering suggest text)
+    assert window.table.item(1, COL_NAME).text() == ""
+    assert window.table.item(1, COL_NAME).data(Qt.ItemDataRole.UserRole) is None
+    print("✓ Repeated scan verified: Existing row Qty auto-incremented to 2 and scan row stayed cleanly blank!")
+
     print("\n===========================================================")
-    print("ALL 11 ARCHITECTURAL, MULTI-TAB & DISCOUNT TESTS PASSED!")
+    print("ALL 12 ARCHITECTURAL, SCANNER & DISCOUNT TESTS PASSED!")
     print("===========================================================\n")
 
 

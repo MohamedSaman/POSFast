@@ -1,11 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 
+datas_list = [('icon.png', '.')]
+if os.path.exists('pos_default.db'):
+    datas_list.append(('pos_default.db', '.'))
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('icon.png', '.')],
+    datas=datas_list,
     hiddenimports=['PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'PyQt6.QtPrintSupport', 'jinja2', 'requests', 'barcode', 'barcode.codex', 'sqlite3'],
     hookspath=[],
     hooksconfig={},

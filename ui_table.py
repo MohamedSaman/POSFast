@@ -129,7 +129,7 @@ class ProductSearchLineEdit(QLineEdit):
     """Custom editor with live auto-suggest dropdown and keyboard navigation."""
     product_selected = pyqtSignal(dict)
     empty_enter_pressed = pyqtSignal()
-    single_enter_confirmed = pyqtSignal()
+    single_enter_confirmed = pyqtSignal(str)
 
     def __init__(self, db: DatabaseManager, theme_mode: str = "dark", parent=None):
         super().__init__(parent)
@@ -201,7 +201,10 @@ class ProductSearchLineEdit(QLineEdit):
 
     def _apply_product(self, product: dict):
         self.popup.hide()
+        self.popup.clear()
+        self.blockSignals(True)
         self.setText(product["name"])
+        self.blockSignals(False)
         self.product_selected.emit(product)
 
     def keyPressEvent(self, event: QKeyEvent):
@@ -237,12 +240,12 @@ class ProductSearchLineEdit(QLineEdit):
                 self.empty_enter_pressed.emit()
                 return
 
-            # Check if typed exact barcode or SKU or exact name
+            # Check if typed exact barcode or SKU or exact name or suffix
             found = self.db.get_product_by_code(current_text)
             if found:
                 self._apply_product(found)
             else:
-                self.single_enter_confirmed.emit()
+                self.single_enter_confirmed.emit(current_text)
             return
 
         super().keyPressEvent(event)
@@ -278,7 +281,7 @@ class ProductSuggestDelegate(QStyledItemDelegate):
                 lambda: self.table.on_empty_enter_pressed(index.row())
             )
             editor.single_enter_confirmed.connect(
-                lambda: self.table.on_single_enter_confirmed(index.row())
+                lambda text: self.table.on_single_enter_confirmed(index.row(), text)
             )
             return editor
         return super().createEditor(parent, option, index)
@@ -486,14 +489,25 @@ class POSBillingTable(QTableWidget):
             self.recalculate_row(existing_row)
             self.status_message.emit(f"✓ Scanned {product['name']} (Qty: {new_qty:g})")
 
-            # Keep the current row ready for next scan
+            # Reset the current row so no partial/suggest text lingers
             self.blockSignals(True)
             name_item = self.item(row, COL_NAME)
             if name_item:
                 name_item.setText("")
                 name_item.setData(Qt.ItemDataRole.UserRole, None)
             self.blockSignals(False)
-            QTimer.singleShot(10, lambda: self.focus_cell(row, COL_NAME, edit=True))
+
+            # Ensure any open editor popup is hidden and cleared
+            editor = self.focusWidget()
+            if isinstance(editor, ProductSearchLineEdit):
+                editor.popup.hide()
+                editor.popup.clear()
+                editor.blockSignals(True)
+                editor.clear()
+                editor.blockSignals(False)
+
+            # Re-focus the current row cleanly ready for next scan without showing suggest popup
+            QTimer.singleShot(25, lambda: self.focus_cell(row, COL_NAME, edit=True))
             return
 
         self.blockSignals(True)
@@ -544,20 +558,39 @@ class POSBillingTable(QTableWidget):
         else:
             QTimer.singleShot(10, lambda: self.focus_cell(row, COL_QTY, edit=True, select_all=True))
 
-    def on_single_enter_confirmed(self, row: int):
-        """Cashier pressed Enter on Product Name with custom text."""
+    def on_single_enter_confirmed(self, row: int, typed_text: str = ""):
+        """Cashier pressed Enter on Product Name with custom text or unresolved code."""
         self.empty_enter_count = 0
         name_item = self.item(row, COL_NAME)
-        typed = name_item.text().strip() if name_item else ""
-        prod = name_item.data(Qt.ItemDataRole.UserRole) if name_item else None
-        # Barcode / SKU-like text that matched no product: reject instead of adding a priceless row
-        if typed and not isinstance(prod, dict) and typed.replace("-", "").isalnum() and any(c.isdigit() for c in typed) and len(typed) >= 5:
-            self.blockSignals(True)
-            name_item.setText("")
-            self.blockSignals(False)
-            self.status_message.emit(f"✕ Product not found for code: {typed} (sync products with F10)")
-            QTimer.singleShot(10, lambda: self.focus_cell(row, COL_NAME, edit=True))
+        typed = typed_text.strip() if typed_text else (name_item.text().strip() if name_item else "")
+
+        # Try resolving code via database (exact, suffix, prefix)
+        found = self.db.get_product_by_code(typed) if typed else None
+        if found:
+            self.on_product_selected(row, found)
             return
+
+        # Barcode / SKU-like text that matched no product: reject and clear cell
+        if typed and any(c.isdigit() for c in typed) and len(typed) >= 4:
+            self.blockSignals(True)
+            if name_item:
+                name_item.setText("")
+                name_item.setData(Qt.ItemDataRole.UserRole, None)
+            self.blockSignals(False)
+
+            editor = self.focusWidget()
+            if isinstance(editor, QLineEdit):
+                editor.blockSignals(True)
+                editor.clear()
+                editor.blockSignals(False)
+
+            self.status_message.emit(f"✕ Product not found for code: {typed} (Press F10 to sync catalog)")
+            QTimer.singleShot(20, lambda: self.focus_cell(row, COL_NAME, edit=True))
+            return
+
+        # Plain custom text item entered manually by cashier
+        if name_item and typed:
+            name_item.setText(typed)
         qty_item = self.item(row, COL_QTY)
         if qty_item and not qty_item.text().strip():
             qty_item.setText("1")

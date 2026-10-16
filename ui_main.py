@@ -856,6 +856,16 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, lambda: self.table.focus_cell(0, COL_NAME, edit=True))
         self._render_bill_tabs()
 
+        # Global Barcode / QR Scanner Buffer
+        self._scan_buffer = ""
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setSingleShot(True)
+        self._scan_timer.setInterval(250)
+        self._scan_timer.timeout.connect(self._clear_scan_buffer)
+
+    def _clear_scan_buffer(self):
+        self._scan_buffer = ""
+
     def toggle_theme(self):
         """Switches between Dark and Light mode instantly."""
         new_theme = "light" if self.current_theme == "dark" else "dark"
@@ -2322,5 +2332,32 @@ class MainWindow(QMainWindow):
         elif key == Qt.Key.Key_F12:
             self.open_settings()
             return
+
+        # Global USB / Wireless Barcode & QR Scanner Capture
+        focus_w = self.focusWidget()
+        is_editing_text = isinstance(focus_w, (QLineEdit, QTextEdit, QPlainTextEdit))
+
+        if not is_editing_text:
+            text = event.text()
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                scanned = self._scan_buffer.strip()
+                self._scan_buffer = ""
+                if scanned:
+                    prod = self.db.get_product_by_code(scanned)
+                    if prod:
+                        cur_row = self.table.rowCount() - 1
+                        if cur_row < 0:
+                            cur_row = self.table.add_blank_row()
+                        name_item = self.table.item(cur_row, COL_NAME)
+                        if name_item and name_item.text().strip():
+                            cur_row = self.table.add_blank_row()
+                        self.table.on_product_selected(cur_row, prod)
+                        return
+                    else:
+                        self.show_status_bar_message(f"✕ Product not found for scanned code: '{scanned}' (Press F10 to sync)")
+                        return
+            elif text and text.isprintable():
+                self._scan_buffer += text
+                self._scan_timer.start()
 
         super().keyPressEvent(event)

@@ -87,10 +87,18 @@ if not exist "dist\FastPOS\FastPOS.exe" (
 
 echo.
 :: Step 4: Create Desktop & Start Menu Shortcut
-echo [4/4] Creating Desktop Shortcut...
+echo [4/4] Finalizing setup & creating Desktop Shortcut...
 set "EXE_PATH=%~dp0dist\FastPOS\FastPOS.exe"
 set "WORKING_DIR=%~dp0dist\FastPOS"
 set "ICON_PATH=%~dp0icon.ico"
+
+if exist "%~dp0pos_default.db" (
+    echo [*] Pre-loading offline product catalog (4,600+ items)...
+    copy /y "%~dp0pos_default.db" "%WORKING_DIR%\pos_local.db" >nul
+) else if exist "%~dp0pos_local.db" (
+    echo [*] Pre-loading offline product catalog...
+    copy /y "%~dp0pos_local.db" "%WORKING_DIR%\pos_local.db" >nul
+)
 
 powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'FastPOS Premium.lnk')); $s.TargetPath = '%EXE_PATH%'; $s.WorkingDirectory = '%WORKING_DIR%'; $s.IconLocation = '%ICON_PATH%'; $s.Description = 'FastPOS Premium Terminal'; $s.Save()"
 

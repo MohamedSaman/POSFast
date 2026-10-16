@@ -34,6 +34,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+if exist "pos_default.db" (
+    copy /y pos_default.db dist\FastPOS\pos_local.db >nul
+)
+
 echo.
 echo ====================================================================
 echo [Step 3/3] SUCCESS! FastPOS Windows App is Ready!

@@ -390,11 +390,13 @@ class SyncWorker(QThread):
                     for bill in synced_bills:
                         self.invoice_pushed.emit(bill, True, "Synced to cloud")
 
-                # If manual product sync was explicitly requested
-                if self._sync_products_requested:
+                # Auto-sync product catalog if database has fewer than 50 items or if explicitly requested
+                current_prod_count = self.db.get_product_count()
+                if self._sync_products_requested or current_prod_count < 50:
                     self._sync_products_requested = False
                     p_count = self.sync_product_catalog(base_url, headers)
-                    self.product_sync_completed.emit(p_count, f"Updated {p_count} products from cloud")
+                    if p_count > 0:
+                        self.product_sync_completed.emit(p_count, f"Synced {p_count} products from cloud")
 
                 # If sales sync was requested
                 if self._pull_sales_requested:
