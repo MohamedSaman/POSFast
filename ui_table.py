@@ -224,6 +224,11 @@ class ProductSearchLineEdit(QLineEdit):
         """Resolves current scanned or typed text immediately."""
         self._search_timer.stop()
         had_popup = self.popup.isVisible() and self.popup.count() > 0
+        popup_product = None
+        if had_popup:
+            top_item = self.popup.currentItem() or self.popup.item(0)
+            if top_item:
+                popup_product = top_item.data(Qt.ItemDataRole.UserRole)
         self.popup.hide()
 
         current_text = self.text().strip()
@@ -231,32 +236,30 @@ class ProductSearchLineEdit(QLineEdit):
             self.empty_enter_pressed.emit()
             return
 
-        # 1. Local database lookup (exact barcode, SKU, ID, suffix, prefix)
-        found = self.db.get_product_by_code(current_text)
+        # 1. If suggestion popup was showing and had a match, select it instantly (0ms delay)!
+        if popup_product:
+            self._apply_product(popup_product)
+            return
 
-        # 2. Remote lookup fallback if not found locally
-        if not found:
+        # 2. Local database lookup (exact barcode, SKU, ID, suffix, prefix)
+        found = self.db.get_product_by_code(current_text)
+        if found:
+            self._apply_product(found)
+            return
+
+        # 3. Remote lookup fallback ONLY for barcode/QR/digits if not found locally
+        is_code_like = any(c.isdigit() for c in current_text) or "product-image" in current_text or current_text.startswith("]")
+        if not found and is_code_like:
             table = self.parent()
             while table and not hasattr(table, 'lookup_remote_product'):
                 table = table.parent()
             if table and hasattr(table, 'lookup_remote_product'):
                 found = table.lookup_remote_product(current_text)
+            if found:
+                self._apply_product(found)
+                return
 
-        # 3. If found locally or remotely: apply immediately
-        if found:
-            self._apply_product(found)
-            return
-
-        # 4. If user was typing and popup had items, select top match
-        if had_popup and self.popup.count() > 0:
-            top_item = self.popup.currentItem() or self.popup.item(0)
-            if top_item:
-                prod = top_item.data(Qt.ItemDataRole.UserRole)
-                if prod:
-                    self._apply_product(prod)
-                    return
-
-        # 5. Custom item name or unresolved code fallback
+        # 4. Custom item name or unresolved code fallback
         self.single_enter_confirmed.emit(current_text)
 
     def keyPressEvent(self, event: QKeyEvent):
@@ -624,7 +627,8 @@ class POSBillingTable(QTableWidget):
 
         # Try resolving code via database (exact, suffix, prefix)
         found = self.db.get_product_by_code(typed) if typed else None
-        if not found and typed:
+        is_code_like = any(c.isdigit() for c in typed) or "product-image" in typed or typed.startswith("]")
+        if not found and typed and is_code_like:
             found = self.lookup_remote_product(typed)
         if found:
             self.on_product_selected(row, found)

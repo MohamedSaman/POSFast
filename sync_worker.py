@@ -252,20 +252,15 @@ class SyncWorker(QThread):
         base_url = self.build_base_url(tenant, base_domain)
         headers = self.get_headers(token, terminal)
 
-        alt_base = base_url.replace("/api/v1", "/api") if "/api/v1" in base_url else base_url
         endpoints = [
             f"{base_url}/pos/products/sync?search={term}&per_page=10",
-            f"{base_url}/pos/products?search={term}&per_page=10",
-            f"{alt_base}/pos/products/sync?search={term}&per_page=10",
-            f"{alt_base}/products?search={term}"
         ]
-
         if "127.0.0.1" not in base_url and "localhost" not in base_url:
             endpoints.append(f"http://127.0.0.1:8000/api/v1/pos/products/sync?search={term}&per_page=10")
 
         for ep in endpoints:
             try:
-                resp = requests.get(ep, headers=headers, timeout=2.5, verify=False)
+                resp = requests.get(ep, headers=headers, timeout=1.2, verify=False)
                 if resp.status_code != 200:
                     continue
                 data = resp.json()
