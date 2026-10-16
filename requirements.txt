@@ -1,0 +1,5 @@
+PyQt6>=6.6.0
+requests>=2.31.0
+Jinja2>=3.1.2
+python-barcode>=0.15.0
+pyinstaller>=6.0.0

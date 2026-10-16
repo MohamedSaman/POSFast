@@ -1,0 +1,48 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# PyInstaller / Build Artifacts
+build/
+dist/
+*.spec.bak
+*.exe
+*.app
+*.dmg
+*.pkg
+
+# Distribution Archives
+*.zip
+*.tar.gz
+*.7z
+
+# Local Databases & Dynamic Runtime Data
+*.db
+*.sqlite
+*.sqlite3
+!test_pos.db.example
+receipts/
+logs/
+*.log
+
+# OS & IDE Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
