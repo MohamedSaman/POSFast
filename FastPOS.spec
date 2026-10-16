@@ -20,6 +20,8 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+icon_path = 'icon.ico' if os.path.exists('icon.ico') else 'icon.png'
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -36,7 +38,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon.png'],
+    icon=icon_path,
 )
 coll = COLLECT(
     exe,
