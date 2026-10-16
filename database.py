@@ -660,7 +660,7 @@ class DatabaseManager:
             if date_str in ["all", "recent"]:
                 cursor.execute("""
                     SELECT * FROM invoices 
-                    ORDER BY id DESC 
+                    ORDER BY created_at DESC, id DESC 
                     LIMIT 50
                 """)
             else:
@@ -669,7 +669,7 @@ class DatabaseManager:
                 cursor.execute("""
                     SELECT * FROM invoices 
                     WHERE created_at LIKE ? 
-                    ORDER BY id DESC
+                    ORDER BY created_at DESC, id DESC
                 """, (f"{date_str}%",))
 
             rows = cursor.fetchall()

@@ -13,7 +13,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QLineEdit, QPushButton, QFrame, QSplitter, QDialog, 
     QMessageBox, QListWidget, QListWidgetItem, QDialogButtonBox,
-    QCheckBox, QGridLayout, QSizePolicy, QApplication, QScrollArea
+    QCheckBox, QGridLayout, QSizePolicy, QApplication, QScrollArea,
+    QTextEdit, QPlainTextEdit
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent
 from PyQt6.QtGui import QFont, QIcon, QKeyEvent, QColor

@@ -7,6 +7,7 @@ or void incorrect entries while maintaining stock integrity.
 
 from decimal import Decimal
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
@@ -314,6 +315,9 @@ class SalesListDialog(QDialog):
         self.all_invoices: List[Dict[str, Any]] = []
         self.filtered_invoices: List[Dict[str, Any]] = []
         self.sync_worker_thread: Optional[LiveSalesSyncWorker] = None
+        self.sort_column = 0 # Default column: 0 (Bill #)
+        self.sort_order = Qt.SortOrder.DescendingOrder # Default: Descending (highest / newest bill first)
+        self.base_headers = ["Bill #", "Time", "Customer", "Phone", "Items", "Subtotal", "Discount", "Grand Total", "Payment", "SMS", "Cloud Sync"]
 
         self.setWindowTitle("Today's Sales & Receipts (F6) - Live Domain Sync")
         self.setMinimumSize(1200, 640)
@@ -413,6 +417,28 @@ class SalesListDialog(QDialog):
         self.txt_filter.textChanged.connect(self._apply_filter)
         h_layout.addWidget(self.txt_filter)
 
+        # Sort Order Toggle Button (Ascending / Descending)
+        self.btn_sort = QPushButton("⬇ Bill # (Desc)")
+        self.btn_sort.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sort.setToolTip("Toggle Order: Descending (Newest first) or Ascending (Oldest first). You can also click any column header.")
+        self.btn_sort.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t['btn_secondary_bg']};
+                color: {t['accent']};
+                border: 1px solid {t['border']};
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-weight: bold;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {t['btn_secondary_hover']};
+                color: #ffffff;
+            }}
+        """)
+        self.btn_sort.clicked.connect(self._toggle_sort_order)
+        h_layout.addWidget(self.btn_sort)
+
         self.btn_refresh = QPushButton("🔄 Refresh & Sync")
         self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_refresh.setStyleSheet(f"""
@@ -435,8 +461,7 @@ class SalesListDialog(QDialog):
 
         # 2. Invoices Table
         self.table = QTableWidget(0, 11)
-        headers = ["Bill #", "Time", "Customer", "Phone", "Items", "Subtotal", "Discount", "Grand Total", "Payment", "SMS", "Cloud Sync"]
-        self.table.setHorizontalHeaderLabels(headers)
+        self.table.setHorizontalHeaderLabels(self.base_headers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -470,9 +495,17 @@ class SalesListDialog(QDialog):
                 border-bottom: 2px solid {t['border']};
                 border-right: 1px solid {t['border']};
             }}
+            QHeaderView::section:hover {{
+                background-color: {t['btn_secondary_hover']};
+                color: {t['accent']};
+            }}
         """)
 
         header = self.table.horizontalHeader()
+        header.setSectionsClickable(True)
+        header.setSortIndicatorShown(True)
+        header.sectionClicked.connect(self._on_header_section_clicked)
+
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed) # Bill #
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed) # Time
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch) # Customer
@@ -485,8 +518,8 @@ class SalesListDialog(QDialog):
         header.setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed) # SMS
         header.setSectionResizeMode(10, QHeaderView.ResizeMode.Fixed) # Sync
 
-        self.table.setColumnWidth(0, 105) # Bill #
-        self.table.setColumnWidth(1, 75)  # Time
+        self.table.setColumnWidth(0, 115) # Bill #
+        self.table.setColumnWidth(1, 80)  # Time
         # Column 2: Customer (Stretch)
         self.table.setColumnWidth(3, 105) # Phone
         self.table.setColumnWidth(4, 70)  # Items
@@ -607,6 +640,8 @@ class SalesListDialog(QDialog):
         action_bar.addWidget(self.btn_close)
 
         layout.addLayout(action_bar)
+        self._update_header_labels()
+        self._update_sort_button_text()
 
     def _set_date_filter(self, mode: str):
         today = datetime.now()
@@ -695,6 +730,107 @@ class SalesListDialog(QDialog):
         self.all_invoices = self.db.get_todays_invoices(self.current_date_filter)
         self._apply_filter(self.txt_filter.text())
 
+    @staticmethod
+    def _extract_bill_seq(bill_no: Any) -> int:
+        """Extracts the numeric sequence from a bill number (e.g. #10625 -> 10625)."""
+        nums = re.findall(r"\d+", str(bill_no or ""))
+        return int(nums[-1]) if nums else 0
+
+    def _get_sort_key(self, inv: Dict[str, Any], column: int):
+        if column == 0:  # Bill #
+            return self._extract_bill_seq(inv.get("bill_no", ""))
+        elif column == 1:  # Time
+            return str(inv.get("created_at", ""))
+        elif column == 2:  # Customer
+            return str(inv.get("customer_name") or "").lower()
+        elif column == 3:  # Phone
+            return str(inv.get("customer_phone") or "")
+        elif column == 4:  # Items count
+            items = inv.get("items", [])
+            return len(items) if isinstance(items, list) else 0
+        elif column == 5:  # Subtotal
+            try:
+                return float(inv.get("subtotal", 0.0) or 0.0)
+            except Exception:
+                return 0.0
+        elif column == 6:  # Discount
+            try:
+                return float(inv.get("discount", 0.0) or 0.0)
+            except Exception:
+                return 0.0
+        elif column == 7:  # Grand Total
+            try:
+                return float(inv.get("grand_total", 0.0) or 0.0)
+            except Exception:
+                return 0.0
+        elif column == 8:  # Payment method
+            return str(inv.get("payment_method", "")).lower()
+        elif column == 9:  # SMS status
+            return int(inv.get("sms_sent", 0) or 0)
+        elif column == 10:  # Sync status
+            return int(inv.get("is_synced", 0) or 0)
+        return self._extract_bill_seq(inv.get("bill_no", ""))
+
+    def _sort_invoices(self, invoices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        reverse = (self.sort_order == Qt.SortOrder.DescendingOrder)
+        return sorted(invoices, key=lambda inv: self._get_sort_key(inv, self.sort_column), reverse=reverse)
+
+    def _update_header_labels(self):
+        for i, title in enumerate(self.base_headers):
+            if i == self.sort_column:
+                arrow = " ⬇" if self.sort_order == Qt.SortOrder.DescendingOrder else " ⬆"
+                item = QTableWidgetItem(f"{title}{arrow}")
+            else:
+                item = QTableWidgetItem(title)
+            self.table.setHorizontalHeaderItem(i, item)
+        self.table.horizontalHeader().setSortIndicator(self.sort_column, self.sort_order)
+
+    def _update_sort_button_text(self):
+        col_names = {
+            0: "Bill #", 1: "Time", 2: "Customer", 3: "Phone", 4: "Items",
+            5: "Subtotal", 6: "Discount", 7: "Total", 8: "Payment", 9: "SMS", 10: "Sync"
+        }
+        col_name = col_names.get(self.sort_column, "Bill #")
+        if self.sort_order == Qt.SortOrder.DescendingOrder:
+            self.btn_sort.setText(f"⬇ {col_name} (Desc)")
+            self.btn_sort.setToolTip(f"Currently sorted by {col_name} Descending (Newest / Highest first). Click to switch to Ascending.")
+        else:
+            self.btn_sort.setText(f"⬆ {col_name} (Asc)")
+            self.btn_sort.setToolTip(f"Currently sorted by {col_name} Ascending (Oldest / Lowest first). Click to switch to Descending.")
+
+    def _on_header_section_clicked(self, logical_index: int):
+        """Called when cashier clicks any column header to toggle / change sort order."""
+        if self.sort_column == logical_index:
+            # Toggle between Descending and Ascending
+            if self.sort_order == Qt.SortOrder.DescendingOrder:
+                self.sort_order = Qt.SortOrder.AscendingOrder
+            else:
+                self.sort_order = Qt.SortOrder.DescendingOrder
+        else:
+            # Switch to new column
+            self.sort_column = logical_index
+            if logical_index in (0, 1, 4, 5, 6, 7):
+                self.sort_order = Qt.SortOrder.DescendingOrder
+            else:
+                self.sort_order = Qt.SortOrder.AscendingOrder
+
+        self._update_header_labels()
+        self._update_sort_button_text()
+        self.filtered_invoices = self._sort_invoices(self.filtered_invoices)
+        self._render_table()
+
+    def _toggle_sort_order(self):
+        """Called when cashier clicks the sort button in toolbar."""
+        if self.sort_order == Qt.SortOrder.DescendingOrder:
+            self.sort_order = Qt.SortOrder.AscendingOrder
+        else:
+            self.sort_order = Qt.SortOrder.DescendingOrder
+
+        self._update_header_labels()
+        self._update_sort_button_text()
+        self.filtered_invoices = self._sort_invoices(self.filtered_invoices)
+        self._render_table()
+
     def _apply_filter(self, query: str = ""):
         q = query.strip().lower()
         if not q:
@@ -708,9 +844,20 @@ class SalesListDialog(QDialog):
                 or q in inv.get("payment_method", "").lower()
             ]
 
+        self.filtered_invoices = self._sort_invoices(self.filtered_invoices)
         self._render_table()
 
     def _render_table(self):
+        # Save selected bill_no to restore selection after re-rendering
+        selected_bill_no = None
+        cur_row = self.table.currentRow()
+        if cur_row >= 0:
+            cur_item = self.table.item(cur_row, 0)
+            if cur_item:
+                inv_data = cur_item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(inv_data, dict):
+                    selected_bill_no = inv_data.get("bill_no")
+
         self.table.setRowCount(0)
         total_rev = Decimal("0.00")
 
@@ -832,7 +979,17 @@ class SalesListDialog(QDialog):
 
         self.lbl_stats.setText(f"Total Bills ({scope_name}): <b>{count}</b> | Total Revenue: <b style='color:#2ecc71;'>Rs. {total_rev:,.2f}</b>")
 
-        if self.table.rowCount() > 0:
+        restored = False
+        if selected_bill_no:
+            for r in range(self.table.rowCount()):
+                it = self.table.item(r, 0)
+                if it:
+                    d = it.data(Qt.ItemDataRole.UserRole)
+                    if isinstance(d, dict) and d.get("bill_no") == selected_bill_no:
+                        self.table.selectRow(r)
+                        restored = True
+                        break
+        if not restored and self.table.rowCount() > 0:
             self.table.selectRow(0)
 
     def _get_selected_invoice(self) -> Optional[Dict[str, Any]]:
