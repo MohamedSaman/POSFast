@@ -13,7 +13,8 @@ from typing import Optional, Dict, Any, List
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QMessageBox, QFrame, QPlainTextEdit, QApplication, QInputDialog
+    QMessageBox, QFrame, QPlainTextEdit, QApplication, QInputDialog,
+    QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QFont, QColor, QKeyEvent
@@ -100,8 +101,9 @@ class ReprintReceiptDialog(QDialog):
         self.theme_mode = theme_mode
         self.receipt_text = format_thermal_receipt(inv, tenant, cashier)
 
-        self.setWindowTitle(f"Receipt Preview - {inv.get('bill_no', '')}")
-        self.setFixedSize(460, 580)
+        raw_no = str(inv.get('bill_no', '')).lstrip('#')
+        self.setWindowTitle(f"Receipt Preview - #{raw_no}")
+        self.setFixedSize(540, 680)
         self.setModal(True)
         self.init_ui()
 
@@ -110,12 +112,13 @@ class ReprintReceiptDialog(QDialog):
         self.setStyleSheet(f"QDialog {{ background-color: {t['bg_main']}; color: {t['text_main']}; }}")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
         # Header Title
         title_box = QHBoxLayout()
-        lbl_title = QLabel(f"🖨️ Receipt #{self.inv.get('bill_no', '')}")
+        raw_no = str(self.inv.get('bill_no', '')).lstrip('#')
+        lbl_title = QLabel(f"🖨️ Receipt #{raw_no}")
         lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {t['accent']};")
         title_box.addWidget(lbl_title)
         title_box.addStretch()
@@ -133,27 +136,30 @@ class ReprintReceiptDialog(QDialog):
         self.txt_receipt.setStyleSheet(f"QTextBrowser {{ background-color: #ffffff; color: #000000; border: 1px solid {t['border']}; border-radius: 6px; }}")
         try:
             doc = self.engine.build_document(self.inv)
-            doc.setTextWidth(280)
+            doc.setTextWidth(360)
             self.txt_receipt.setDocument(doc)
             self._preview_doc = doc
         except Exception:
             self.txt_receipt.setPlainText(self.receipt_text)
         layout.addWidget(self.txt_receipt)
 
-        # Bottom Buttons
+        # Bottom Action Buttons Bar
         btn_box = QHBoxLayout()
-        btn_box.setSpacing(10)
+        btn_box.setSpacing(8)
 
         self.btn_copy = QPushButton("📋 Copy Text")
         self.btn_copy.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_copy.setFixedHeight(40)
+        self.btn_copy.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_copy.setStyleSheet(f"""
             QPushButton {{
                 background-color: {t['btn_secondary_bg']};
                 color: {t['btn_secondary_text']};
                 border: 1px solid {t['border']};
                 border-radius: 6px;
-                padding: 10px 16px;
+                padding: 8px 6px;
                 font-weight: 600;
+                font-size: 12px;
             }}
             QPushButton:hover {{
                 background-color: {t['btn_secondary_hover']};
@@ -163,16 +169,18 @@ class ReprintReceiptDialog(QDialog):
         self.btn_copy.clicked.connect(self._copy_to_clipboard)
         btn_box.addWidget(self.btn_copy)
 
-        self.btn_print = QPushButton("🖨️ Direct Thermal Print")
+        self.btn_print = QPushButton("🖨️ Print Receipt")
         self.btn_print.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_print.setFixedHeight(40)
+        self.btn_print.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_print.setStyleSheet(f"""
             QPushButton {{
                 background-color: {t['btn_success_bg']};
                 color: #ffffff;
                 border: none;
                 border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 13px;
+                padding: 8px 6px;
+                font-size: 12px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -184,14 +192,16 @@ class ReprintReceiptDialog(QDialog):
 
         self.btn_sms = QPushButton("📱 Send SMS")
         self.btn_sms.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sms.setFixedHeight(40)
+        self.btn_sms.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_sms.setStyleSheet(f"""
             QPushButton {{
                 background-color: {t['accent']};
                 color: #0f172a;
                 border: none;
                 border-radius: 6px;
-                padding: 10px 16px;
-                font-size: 13px;
+                padding: 8px 6px;
+                font-size: 12px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -201,15 +211,19 @@ class ReprintReceiptDialog(QDialog):
         self.btn_sms.clicked.connect(self._send_sms)
         btn_box.addWidget(self.btn_sms)
 
-        self.btn_close = QPushButton("Close (Esc)")
+        self.btn_close = QPushButton("✕ Close (Esc)")
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_close.setFixedHeight(40)
+        self.btn_close.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_close.setStyleSheet(f"""
             QPushButton {{
                 background-color: {t['btn_secondary_bg']};
                 color: {t['btn_secondary_text']};
                 border: 1px solid {t['border']};
                 border-radius: 6px;
-                padding: 10px 14px;
+                padding: 8px 6px;
+                font-size: 12px;
+                font-weight: 600;
             }}
             QPushButton:hover {{
                 background-color: {t['btn_secondary_hover']};
@@ -302,7 +316,8 @@ class SalesListDialog(QDialog):
         self.sync_worker_thread: Optional[LiveSalesSyncWorker] = None
 
         self.setWindowTitle("Today's Sales & Receipts (F6) - Live Domain Sync")
-        self.setMinimumSize(1120, 600)
+        self.setMinimumSize(1200, 640)
+        self.resize(1260, 700)
         self.setModal(True)
         self.init_ui()
         self.load_data(fetch_live=True)
@@ -470,16 +485,17 @@ class SalesListDialog(QDialog):
         header.setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed) # SMS
         header.setSectionResizeMode(10, QHeaderView.ResizeMode.Fixed) # Sync
 
-        self.table.setColumnWidth(0, 105)
-        self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(3, 110)
-        self.table.setColumnWidth(4, 75)
-        self.table.setColumnWidth(5, 90)
-        self.table.setColumnWidth(6, 85)
-        self.table.setColumnWidth(7, 110)
-        self.table.setColumnWidth(8, 80)
-        self.table.setColumnWidth(9, 90)
-        self.table.setColumnWidth(10, 95)
+        self.table.setColumnWidth(0, 105) # Bill #
+        self.table.setColumnWidth(1, 75)  # Time
+        # Column 2: Customer (Stretch)
+        self.table.setColumnWidth(3, 105) # Phone
+        self.table.setColumnWidth(4, 70)  # Items
+        self.table.setColumnWidth(5, 120) # Subtotal
+        self.table.setColumnWidth(6, 115) # Discount
+        self.table.setColumnWidth(7, 125) # Grand Total
+        self.table.setColumnWidth(8, 105) # Payment
+        self.table.setColumnWidth(9, 75)  # SMS
+        self.table.setColumnWidth(10, 95) # Sync
 
         self.table.doubleClicked.connect(self._reprint_selected)
         layout.addWidget(self.table)
