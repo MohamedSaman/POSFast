@@ -35,6 +35,7 @@ class TestConnectionWorker(QThread):
 class SettingsDialog(QDialog):
     settings_saved = pyqtSignal()
     theme_changed = pyqtSignal(str)
+    database_cleared = pyqtSignal()
 
     def __init__(self, db: DatabaseManager, sync_worker: SyncWorker = None, parent=None, theme_mode: str = "dark"):
         super().__init__(parent)
@@ -42,8 +43,9 @@ class SettingsDialog(QDialog):
         self.sync_worker = sync_worker
         self.current_theme = theme_mode or self.db.get_setting("theme", "dark")
         self.auto_sms_enabled = "1"
+        self.auto_sync_enabled = "1"
         self.setWindowTitle("System & Multi-Tenant Settings (F12)")
-        self.setFixedSize(620, 740)
+        self.setFixedSize(640, 840)
         self.setModal(True)
         self.init_ui()
         self.load_settings()
@@ -51,8 +53,8 @@ class SettingsDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(14)
-        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+        layout.setContentsMargins(24, 20, 24, 20)
 
         # Header Title
         self.title_label = QLabel("⚙️ Multi-Tenant Cloud API & System Configuration")
@@ -60,7 +62,7 @@ class SettingsDialog(QDialog):
         self.title_label.setStyleSheet("font-size: 17px; font-weight: bold; color: #00e5ff;")
         layout.addWidget(self.title_label)
 
-        self.desc_label = QLabel("Configure your Laravel backend connection, cashier ID, and theme appearance.")
+        self.desc_label = QLabel("Configure your Laravel backend connection, cashier ID, SMS gateway, and sync preferences.")
         self.desc_label.setStyleSheet("color: #a0aec0; font-size: 12px;")
         layout.addWidget(self.desc_label)
 
@@ -79,12 +81,12 @@ class SettingsDialog(QDialog):
         theme_box.setSpacing(8)
         self.btn_theme_dark = QPushButton("🌙 Dark Mode")
         self.btn_theme_dark.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_theme_dark.setFixedHeight(34)
+        self.btn_theme_dark.setFixedHeight(32)
         self.btn_theme_dark.clicked.connect(lambda: self.switch_theme("dark"))
 
         self.btn_theme_light = QPushButton("☀️ Light Mode")
         self.btn_theme_light.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_theme_light.setFixedHeight(34)
+        self.btn_theme_light.setFixedHeight(32)
         self.btn_theme_light.clicked.connect(lambda: self.switch_theme("light"))
 
         theme_box.addWidget(self.btn_theme_dark)
@@ -166,7 +168,37 @@ class SettingsDialog(QDialog):
         form_layout.addWidget(self.lbl_cashier, 5, 0)
         form_layout.addWidget(self.txt_cashier, 5, 1)
 
-        # 6. Auto-Send Customer SMS
+        # 6. SMS Sender ID
+        self.lbl_sms_sender = QLabel("SMS Sender ID (Mask):")
+        self.lbl_sms_sender.setStyleSheet("font-weight: 600;")
+        self.txt_sms_sender = QLineEdit()
+        self.txt_sms_sender.setPlaceholderText("e.g. Jaffna Gold, FastPOS")
+        form_layout.addWidget(self.lbl_sms_sender, 6, 0)
+        form_layout.addWidget(self.txt_sms_sender, 6, 1)
+
+        # 7. Auto Live Sync Background Toggle
+        self.lbl_auto_sync = QLabel("Auto Live Sync:")
+        self.lbl_auto_sync.setStyleSheet("font-weight: 600;")
+        auto_sync_box = QHBoxLayout()
+        auto_sync_box.setSpacing(8)
+        self.btn_auto_sync_on = QPushButton("🟢 Enabled (ON)")
+        self.btn_auto_sync_on.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_auto_sync_on.setFixedHeight(32)
+        self.btn_auto_sync_on.clicked.connect(lambda: self.set_auto_sync_enabled("1"))
+
+        self.btn_auto_sync_off = QPushButton("⚪ Disabled (OFF)")
+        self.btn_auto_sync_off.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_auto_sync_off.setFixedHeight(32)
+        self.btn_auto_sync_off.clicked.connect(lambda: self.set_auto_sync_enabled("0"))
+
+        auto_sync_box.addWidget(self.btn_auto_sync_on)
+        auto_sync_box.addWidget(self.btn_auto_sync_off)
+        auto_sync_box.addStretch()
+
+        form_layout.addWidget(self.lbl_auto_sync, 7, 0)
+        form_layout.addLayout(auto_sync_box, 7, 1)
+
+        # 8. Auto-Send Customer SMS
         self.lbl_sms_toggle = QLabel("Auto SMS Receipts:")
         self.lbl_sms_toggle.setStyleSheet("font-weight: 600;")
         
@@ -174,22 +206,22 @@ class SettingsDialog(QDialog):
         sms_btn_box.setSpacing(8)
         self.btn_sms_on = QPushButton("🟢 Enabled (ON)")
         self.btn_sms_on.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_sms_on.setFixedHeight(34)
+        self.btn_sms_on.setFixedHeight(32)
         self.btn_sms_on.clicked.connect(lambda: self.set_sms_enabled("1"))
 
         self.btn_sms_off = QPushButton("⚪ Disabled (OFF)")
         self.btn_sms_off.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_sms_off.setFixedHeight(34)
+        self.btn_sms_off.setFixedHeight(32)
         self.btn_sms_off.clicked.connect(lambda: self.set_sms_enabled("0"))
 
         sms_btn_box.addWidget(self.btn_sms_on)
         sms_btn_box.addWidget(self.btn_sms_off)
         sms_btn_box.addStretch()
 
-        form_layout.addWidget(self.lbl_sms_toggle, 6, 0)
-        form_layout.addLayout(sms_btn_box, 6, 1)
+        form_layout.addWidget(self.lbl_sms_toggle, 8, 0)
+        form_layout.addLayout(sms_btn_box, 8, 1)
 
-        # 7. SMS Quick Test Tool
+        # 9. SMS Quick Test Tool
         self.lbl_sms_test = QLabel("Test SMS Gateway:")
         self.lbl_sms_test.setStyleSheet("font-weight: 600;")
         
@@ -200,14 +232,14 @@ class SettingsDialog(QDialog):
         
         self.btn_send_test_sms = QPushButton("📨 Send Test")
         self.btn_send_test_sms.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_send_test_sms.setFixedHeight(34)
+        self.btn_send_test_sms.setFixedHeight(32)
         self.btn_send_test_sms.clicked.connect(self.send_test_sms)
 
         test_sms_box.addWidget(self.txt_test_phone)
         test_sms_box.addWidget(self.btn_send_test_sms)
 
-        form_layout.addWidget(self.lbl_sms_test, 7, 0)
-        form_layout.addLayout(test_sms_box, 7, 1)
+        form_layout.addWidget(self.lbl_sms_test, 9, 0)
+        form_layout.addLayout(test_sms_box, 9, 1)
 
         layout.addWidget(self.form_frame)
 
@@ -224,16 +256,27 @@ class SettingsDialog(QDialog):
         self.lbl_test_status.setWordWrap(True)
         layout.addWidget(self.lbl_test_status)
 
-        # Test Button
-        self.btn_test = QPushButton("⚡ Test Connection & Sync Products Now")
+        # Operations Tools Box
+        tools_row = QHBoxLayout()
+        tools_row.setSpacing(10)
+
+        self.btn_test = QPushButton("⚡ Sync Products Now [F10]")
         self.btn_test.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_test.clicked.connect(self.run_connection_test)
-        layout.addWidget(self.btn_test)
+        tools_row.addWidget(self.btn_test)
 
         self.btn_designer = QPushButton("🖨️ Receipt & Printer Designer...")
         self.btn_designer.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_designer.clicked.connect(self.open_designer)
-        layout.addWidget(self.btn_designer)
+        tools_row.addWidget(self.btn_designer)
+
+        layout.addLayout(tools_row)
+
+        # Storage Management / Clear Database
+        self.btn_clear_db = QPushButton("🗑️ Clear Local Storage / Reset Local Database...")
+        self.btn_clear_db.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_clear_db.clicked.connect(self.confirm_clear_database)
+        layout.addWidget(self.btn_clear_db)
 
         layout.addStretch()
 
@@ -430,7 +473,123 @@ class SettingsDialog(QDialog):
                 background-color: {t['success_hover']};
             }}
         """)
+
+        # Clear Database button styling
+        self.btn_clear_db.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t['btn_default_bg']};
+                color: {t['danger']};
+                border: 1px dashed {t['danger']};
+                border-radius: 6px;
+                padding: 8px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {t['danger']};
+                color: #ffffff;
+                border: 1px solid {t['danger']};
+            }}
+        """)
+
         self.update_sms_button_styles()
+        self.update_auto_sync_button_styles()
+
+    def set_auto_sync_enabled(self, val: str):
+        self.auto_sync_enabled = str(val)
+        self.update_auto_sync_button_styles()
+
+    def update_auto_sync_button_styles(self):
+        t = get_theme_tokens(self.current_theme)
+        is_on = getattr(self, "auto_sync_enabled", "1") == "1"
+        if is_on:
+            self.btn_auto_sync_on.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {t['success']};
+                    color: #ffffff;
+                    border: 2px solid {t['success']};
+                    border-radius: 6px;
+                    padding: 6px 16px;
+                    font-weight: bold;
+                    font-size: 12px;
+                }}
+            """)
+            self.btn_auto_sync_off.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {t['btn_default_bg']};
+                    color: {t['text_muted']};
+                    border: 1px solid {t['border']};
+                    border-radius: 6px;
+                    padding: 6px 16px;
+                    font-size: 12px;
+                }}
+                QPushButton:hover {{
+                    background-color: {t['border']};
+                }}
+            """)
+        else:
+            self.btn_auto_sync_on.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {t['btn_default_bg']};
+                    color: {t['text_muted']};
+                    border: 1px solid {t['border']};
+                    border-radius: 6px;
+                    padding: 6px 16px;
+                    font-size: 12px;
+                }}
+                QPushButton:hover {{
+                    background-color: {t['border']};
+                }}
+            """)
+            self.btn_auto_sync_off.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {t['danger']};
+                    color: #ffffff;
+                    border: 2px solid {t['danger']};
+                    border-radius: 6px;
+                    padding: 6px 16px;
+                    font-weight: bold;
+                    font-size: 12px;
+                }}
+            """)
+
+    def confirm_clear_database(self):
+        unsynced = self.db.get_unsynced_invoices_count()
+        warning_msg = (
+            "Are you sure you want to completely clear the local database cache?\n\n"
+            "This will erase:\n"
+            "• All local products\n"
+            "• All local invoice history\n"
+            "• All active held bills\n\n"
+            "Your server URL, token, and terminal settings will remain saved.\n"
+        )
+        if unsynced > 0:
+            warning_msg += f"\n⚠️ WARNING: You have {unsynced} unsynced bill(s) that have not been uploaded to the live server yet. Clearing now will PERMANENTLY delete them!\n"
+
+        warning_msg += "\nDo you wish to proceed?"
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Clear Local Storage",
+            warning_msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            stats = self.db.clear_local_storage(preserve_settings=True)
+            self.database_cleared.emit()
+            QMessageBox.information(
+                self,
+                "Local Storage Cleared",
+                f"Local database has been wiped clean:\n\n"
+                f"• Products removed: {stats.get('products', 0)}\n"
+                f"• Invoices removed: {stats.get('invoices', 0)}\n"
+                f"• Held bills cleared: {stats.get('held_bills', 0)}\n\n"
+                f"You can click 'Sync Products Now [F10]' anytime to download fresh products from your live server."
+            )
+            self.lbl_test_status.setText("✓ Local database cleared. Click 'Sync Products Now' to pull fresh data.")
+            t = get_theme_tokens(self.current_theme)
+            self.lbl_test_status.setStyleSheet(f"color: {t['accent']}; font-size: 12px;")
 
     def set_sms_enabled(self, val: str):
         self.auto_sms_enabled = str(val)
@@ -539,6 +698,9 @@ class SettingsDialog(QDialog):
         self.txt_token.setText(settings.get("api_token", ""))
         self.txt_terminal.setText(settings.get("terminal_id", "POS-01"))
         self.txt_cashier.setText(settings.get("cashier_name", "Admin"))
+        self.txt_sms_sender.setText(settings.get("sms_sender_id", "Jaffna Gold"))
+        self.auto_sync_enabled = settings.get("auto_sync_enabled", "1")
+        self.set_auto_sync_enabled(self.auto_sync_enabled)
         self.auto_sms_enabled = settings.get("auto_sms_enabled", "1")
         self.set_sms_enabled(self.auto_sms_enabled)
         self.update_url_preview()
@@ -634,8 +796,10 @@ class SettingsDialog(QDialog):
         self.db.set_setting("api_token", self.txt_token.text().strip())
         self.db.set_setting("terminal_id", self.txt_terminal.text().strip() or "POS-01")
         self.db.set_setting("cashier_name", self.txt_cashier.text().strip() or "Admin")
+        self.db.set_setting("sms_sender_id", self.txt_sms_sender.text().strip() or "Jaffna Gold")
         self.db.set_setting("theme", self.current_theme)
         self.db.set_setting("auto_sms_enabled", getattr(self, "auto_sms_enabled", "1"))
+        self.db.set_setting("auto_sync_enabled", getattr(self, "auto_sync_enabled", "1"))
 
         if self.sync_worker:
             self.sync_worker.request_immediate_sync(sync_products=True)

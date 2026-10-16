@@ -158,12 +158,14 @@ class DatabaseManager:
             "auto_discount_percent": "10.0",
             "auto_discount_enabled": "1",
             "auto_sms_enabled": "1",
+            "auto_sync_enabled": "1",
             "shop_name": "Jaffna Gold",
             "sms_sender_id": "Jaffna Gold",
             "sms_api_key": "9b60385e-e599-49f3-a30b-fee08a8aa52a",
             "sms_user_id": "1644",
             "sms_send_url": "https://smslenz.lk/api/send-sms",
-            "last_product_sync": ""
+            "last_product_sync": "",
+            "last_sales_sync": ""
         }
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -220,8 +222,47 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT key, value FROM settings")
-            rows = cursor.fetchall()
             return {row["key"]: row["value"] for row in rows}
+
+    def clear_local_storage(self, preserve_settings: bool = True) -> Dict[str, int]:
+        """
+        Clears local storage tables (products, invoices, held_bills).
+        Resets last_product_sync and last_sales_sync timestamps to enable a clean, full live re-sync.
+        Preserves core system settings unless preserve_settings=False.
+        Returns counts of deleted items.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM products")
+            prod_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM invoices")
+            inv_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM held_bills")
+            held_count = cursor.fetchone()[0]
+
+            cursor.execute("DELETE FROM products;")
+            cursor.execute("DELETE FROM invoices;")
+            cursor.execute("DELETE FROM held_bills;")
+
+            # Reset sync timestamps so next sync downloads fresh full catalog & sales
+            cursor.execute("INSERT INTO settings (key, value) VALUES ('last_product_sync', '') ON CONFLICT(key) DO UPDATE SET value = '';")
+            cursor.execute("INSERT INTO settings (key, value) VALUES ('last_sales_sync', '') ON CONFLICT(key) DO UPDATE SET value = '';")
+
+            if not preserve_settings:
+                cursor.execute("DELETE FROM settings;")
+                self._seed_default_settings()
+
+            conn.commit()
+            cursor.execute("VACUUM;")
+
+            return {
+                "products": prod_count,
+                "invoices": inv_count,
+                "held_bills": held_count,
+                "products_cleared": prod_count,
+                "invoices_cleared": inv_count,
+                "held_bills_cleared": held_count
+            }
 
     # --- Products CRUD ---
     def search_products(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:

@@ -373,6 +373,7 @@ class SyncWorker(QThread):
             base_domain = settings.get("base_domain", "webxkey.lk")
             token = settings.get("api_token", "")
             terminal = settings.get("terminal_id", "POS-01")
+            auto_sync = settings.get("auto_sync_enabled", "1") == "1"
 
             base_url = self.build_base_url(tenant, base_domain)
             headers = self.get_headers(token, terminal)
@@ -382,9 +383,12 @@ class SyncWorker(QThread):
             self.is_online = online
             pending_count = self.db.get_pending_invoice_count()
 
+            # If auto-sync is OFF, only sync if user explicitly triggered it
+            should_sync = auto_sync or self._trigger_now or self._sync_products_requested or self._pull_sales_requested
+
             if online:
-                # Online mode: push pending invoices
-                if pending_count > 0:
+                # Push pending invoices
+                if should_sync and pending_count > 0:
                     pushed_count, synced_bills = self.push_invoices_batch(base_url, headers, terminal)
                     pending_count = self.db.get_pending_invoice_count()
                     for bill in synced_bills:
@@ -392,7 +396,7 @@ class SyncWorker(QThread):
 
                 # Auto-sync product catalog if database has fewer than 50 items or if explicitly requested
                 current_prod_count = self.db.get_product_count()
-                if self._sync_products_requested or current_prod_count < 50:
+                if self._sync_products_requested or (auto_sync and current_prod_count < 50):
                     self._sync_products_requested = False
                     p_count = self.sync_product_catalog(base_url, headers)
                     if p_count > 0:
@@ -404,7 +408,10 @@ class SyncWorker(QThread):
                     s_ok, s_count, s_tot, s_msg = self.pull_domain_sales()
                     self.sales_synced.emit(s_count, s_tot, s_msg)
 
-                status_text = f"ONLINE (Cloud Synced)"
+                if auto_sync:
+                    status_text = "ONLINE (Cloud Synced)"
+                else:
+                    status_text = "ONLINE (Auto-Sync: OFF)"
                 self.status_changed.emit(True, pending_count, status_text)
             else:
                 status_text = f"OFFLINE MODE ({pending_count} bills pending sync)"

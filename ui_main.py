@@ -2238,12 +2238,32 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self.db, self.sync_worker, parent=self, theme_mode=self.current_theme)
         dlg.theme_changed.connect(self.apply_theme)
         dlg.settings_saved.connect(self._on_settings_saved)
+        dlg.database_cleared.connect(self._on_database_cleared)
         dlg.exec()
 
     def _on_settings_saved(self):
         cashier = self.db.get_setting("cashier_name", "Admin")
         self.lbl_cashier.setText(f"Cashier: {cashier}")
         self.show_status_bar_message("Settings saved.")
+
+    def _on_database_cleared(self):
+        self.next_tab_counter = 1
+        self.current_bill_no = self.db.get_next_bill_number()
+        self.current_customer = "Walk-In"
+        self.current_customer_phone = ""
+        self.tabs = [
+            BillTab(
+                tab_id=self.next_tab_counter,
+                bill_no=self.current_bill_no,
+                customer_name=self.current_customer,
+                customer_phone=self.current_customer_phone,
+                payment_method="Cash"
+            )
+        ]
+        self.active_tab_idx = 0
+        self.table.clear_bill()
+        self._load_tab_state(0)
+        self.show_status_bar_message("Local database wiped clean. Press [F10] to re-sync all live products.")
 
     # --- Help Dialog [F1] ---
     def show_help(self):

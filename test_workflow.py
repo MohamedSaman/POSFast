@@ -275,10 +275,57 @@ def run_tests():
     assert window.table.item(1, COL_NAME).data(Qt.ItemDataRole.UserRole) is None
     print("✓ Repeated scan verified: Existing row Qty auto-incremented to 2 and scan row stayed cleanly blank!")
 
+    # --- TEST 13: Local Storage Database Clear & Configs (sms_sender_id, auto_sync_enabled) ---
+    print("\n--- TEST 13: Local Storage Database Clear & Configs (sms_sender_id, auto_sync_enabled) ---")
+    db.set_setting("sms_sender_id", "Jaffna Gold")
+    assert db.get_setting("sms_sender_id") == "Jaffna Gold"
+    db.set_setting("auto_sync_enabled", "0")
+    assert db.get_setting("auto_sync_enabled") == "0"
+    print("✓ Custom sms_sender_id and auto_sync_enabled successfully saved and loaded.")
+
+    # Insert sample data to verify clearing
+    db.create_invoice({
+        "bill_no": "#2026-CLEAR-TEST",
+        "customer_name": "Test Cust",
+        "subtotal": 100.0,
+        "discount": 0.0,
+        "tax": 0.0,
+        "grand_total": 100.0,
+        "payment_method": "CASH",
+        "items_json": [],
+        "created_at": "2026-10-16 12:00:00"
+    }, is_synced=0)
+    db.hold_bill("#2026-HOLD-TEST", "Held Cust", [], 50.0)
+    assert len(db.get_held_bills()) >= 1
+
+    # Execute clear local storage
+    stats = db.clear_local_storage(preserve_settings=True)
+    assert stats["products"] >= 1
+    assert stats["invoices"] >= 1
+    assert stats["held_bills"] >= 1
+    assert len(db.search_products("")) == 0, "Products should be empty after clear"
+    assert db.get_pending_invoice_count() == 0, "Invoices should be empty after clear"
+    assert len(db.get_held_bills()) == 0, "Held bills should be empty after clear"
+    assert db.get_setting("last_product_sync") == ""
+    assert db.get_setting("last_sales_sync") == ""
+
+    # Verify settings are preserved
+    assert db.get_setting("sms_sender_id") == "Jaffna Gold"
+    assert db.get_setting("auto_sync_enabled") == "0"
+    print("✓ Local database wiped clean: products, invoices, and held bills cleared while settings and credentials preserved!")
+
+    # Verify window handles database_cleared signal
+    window._on_database_cleared()
+    assert len(window.tabs) == 1
+    assert window.active_tab_idx == 0
+    assert window.table.rowCount() == 1
+    print("✓ Window UI successfully reset to clean state on database cleared signal.")
+
     print("\n===========================================================")
-    print("ALL 12 ARCHITECTURAL, SCANNER & DISCOUNT TESTS PASSED!")
+    print("ALL 13 ARCHITECTURAL, SCANNER & SETTINGS TESTS PASSED!")
     print("===========================================================\n")
 
 
 if __name__ == "__main__":
     run_tests()
+

@@ -138,10 +138,11 @@ class FastPOSSmsService:
         if token.strip():
             headers["Authorization"] = f"Bearer {token.strip()}"
 
+        sender_id = db.get_setting("sms_sender_id", "Jaffna Gold")
         try:
             resp = requests.post(
                 endpoint,
-                json={"phone": norm_phone, "message": message},
+                json={"phone": norm_phone, "message": message, "sender_id": sender_id},
                 headers=headers,
                 timeout=5.0,
                 verify=False
@@ -158,7 +159,7 @@ class FastPOSSmsService:
         gateway_url = db.get_setting("sms_send_url", "https://smslenz.lk/api/send-sms")
         api_key = db.get_setting("sms_api_key", "9b60385e-e599-49f3-a30b-fee08a8aa52a")
         user_id = db.get_setting("sms_user_id", "1644")
-        sender_id = db.get_setting("sms_sender_id", "Sportynix")
+        sender_id = db.get_setting("sms_sender_id", "Jaffna Gold")
 
         if gateway_url and api_key and user_id:
             try:
