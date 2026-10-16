@@ -2298,6 +2298,7 @@ class MainWindow(QMainWindow):
                 "paid_amount": float(checkout_dlg.paid_amount),
                 "due_amount": float(checkout_dlg.due_amount),
                 "payment_method": checkout_dlg.payment_method,
+                "items": items,
                 "items_json": items,
                 "created_at": now_str,
                 "sms_sent": 0

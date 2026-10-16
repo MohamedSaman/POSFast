@@ -30,10 +30,23 @@ def format_thermal_receipt(inv: Dict[str, Any], tenant_subdomain: str = "dbl", c
     shop_name = "FASTPOS RETAIL TERMINAL"
     items = inv.get("items")
     if items is None:
+        raw_items = inv.get("items_json")
+        if isinstance(raw_items, list):
+            items = raw_items
+        elif isinstance(raw_items, str):
+            try:
+                items = json.loads(raw_items or "[]")
+            except Exception:
+                items = []
+        else:
+            items = []
+    elif isinstance(items, str):
         try:
-            items = json.loads(inv.get("items_json", "[]"))
+            items = json.loads(items or "[]")
         except Exception:
             items = []
+    elif not isinstance(items, list):
+        items = []
 
     created_at = inv.get("created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     customer = inv.get("customer_name") or "Walk-In"

@@ -187,10 +187,23 @@ class POSPrinterEngine:
         cfg = cfg or self.get_config()
         items = inv.get("items")
         if items is None:
+            raw_items = inv.get("items_json")
+            if isinstance(raw_items, list):
+                items = raw_items
+            elif isinstance(raw_items, str):
+                try:
+                    items = json.loads(raw_items or "[]")
+                except Exception:
+                    items = []
+            else:
+                items = []
+        elif isinstance(items, str):
             try:
-                items = json.loads(inv.get("items_json") or "[]")
+                items = json.loads(items or "[]")
             except Exception:
                 items = []
+        elif not isinstance(items, list):
+            items = []
 
         created = str(inv.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         try:
@@ -201,14 +214,16 @@ class POSPrinterEngine:
         rows: List[Dict[str, Any]] = []
         total_qty = 0.0
         for i, it in enumerate(items, 1):
-            qty = float(it.get("qty", 1) or 0)
-            price = float(it.get("unit_price", 0) or 0)
-            disc_pct = float(it.get("discount_percent", 0) or 0)
+            qty = float(it.get("qty") if it.get("qty") is not None else (it.get("quantity", 1) or 0))
+            price = float(it.get("unit_price") if it.get("unit_price") is not None else (it.get("price", 0) or 0))
+            disc_pct = float(it.get("discount_percent") if it.get("discount_percent") is not None else (it.get("disc_pct", 0) or 0))
             disc_amt = qty * price * disc_pct / 100.0
             total_qty += qty
+            name_str = str(it.get("product_name") or it.get("name") or it.get("item_name") or "").upper()
+            line_tot = it.get("line_total") if it.get("line_total") is not None else (it.get("total", qty * price - disc_amt))
             rows.append({
                 "sn": i,
-                "name": str(it.get("product_name", "")).upper(),
+                "name": name_str,
                 "sku": it.get("sku", ""),
                 "qty": fmt_qty(qty),
                 "price": fmt_money(price),
@@ -217,7 +232,7 @@ class POSPrinterEngine:
                 "disc_amount": fmt_money(round(disc_amt)),
                 "disc_amount_raw": disc_amt,
                 "note": it.get("note", ""),
-                "total": fmt_money(it.get("line_total", qty * price - disc_amt)),
+                "total": fmt_money(line_tot),
             })
 
         subtotal = float(inv.get("subtotal", 0) or 0)
