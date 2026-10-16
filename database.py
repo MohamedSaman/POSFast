@@ -545,6 +545,10 @@ class DatabaseManager:
             cursor.execute("SELECT COUNT(*) FROM invoices WHERE is_synced = 0")
             return cursor.fetchone()[0]
 
+    def get_unsynced_invoices_count(self) -> int:
+        """Alias for get_pending_invoice_count."""
+        return self.get_pending_invoice_count()
+
     def get_next_bill_number(self, terminal_id: Optional[str] = None) -> str:
         """Generates sequential clean bill number e.g. #2026-0014 guaranteed to be unique."""
         now = datetime.now()

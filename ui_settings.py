@@ -554,7 +554,7 @@ class SettingsDialog(QDialog):
             """)
 
     def confirm_clear_database(self):
-        unsynced = self.db.get_unsynced_invoices_count()
+        unsynced = self.db.get_pending_invoice_count()
         warning_msg = (
             "Are you sure you want to completely clear the local database cache?\n\n"
             "This will erase:\n"
