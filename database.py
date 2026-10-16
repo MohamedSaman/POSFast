@@ -222,6 +222,7 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT key, value FROM settings")
+            rows = cursor.fetchall()
             return {row["key"]: row["value"] for row in rows}
 
     def clear_local_storage(self, preserve_settings: bool = True) -> Dict[str, int]:

@@ -27,6 +27,8 @@ dist/
 
 # Local Databases & Dynamic Runtime Data
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 !test_pos.db.example

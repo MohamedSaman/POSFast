@@ -281,6 +281,9 @@ def run_tests():
     assert db.get_setting("sms_sender_id") == "Jaffna Gold"
     db.set_setting("auto_sync_enabled", "0")
     assert db.get_setting("auto_sync_enabled") == "0"
+    all_s = db.get_all_settings()
+    assert all_s.get("sms_sender_id") == "Jaffna Gold"
+    assert all_s.get("auto_sync_enabled") == "0"
     print("✓ Custom sms_sender_id and auto_sync_enabled successfully saved and loaded.")
 
     # Insert sample data to verify clearing
