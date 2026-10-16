@@ -54,11 +54,11 @@ def format_thermal_receipt(inv: Dict[str, Any], tenant_subdomain: str = "dbl", c
     ]
 
     for it in items:
-        name = str(it.get("product_name", ""))[:17]
+        name = str(it.get("product_name") or it.get("name") or "")[:17]
         qty = it.get("qty", 1)
-        prc = float(it.get("unit_price", 0.0))
-        tot = float(it.get("line_total", 0.0))
-        disc_pct = float(it.get("discount_percent", 0.0))
+        prc = float(it.get("unit_price") or it.get("price") or 0.0)
+        tot = float(it.get("line_total") or it.get("total") or 0.0)
+        disc_pct = float(it.get("discount_percent") or it.get("disc_pct") or 0.0)
 
         lines.append(f"{name:<17}{qty:>4}{prc:>8.2f}{tot:>9.2f}")
         if disc_pct > 0:

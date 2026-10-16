@@ -1686,13 +1686,13 @@ class MainWindow(QMainWindow):
         self._load_tab_state(new_idx)
         self.show_status_bar_message(f"Opened New Bill Tab #{new_idx + 1} ({new_bill_no})")
 
-    def close_bill_tab(self, index: int):
+    def close_bill_tab(self, index: int, force: bool = False):
         """Closes a bill tab. Offers to Hold/Park the bill if items are present."""
         if not (0 <= index < len(self.tabs)):
             return
 
         if len(self.tabs) <= 1:
-            if self.table.has_valid_items():
+            if not force and self.table.has_valid_items():
                 reply = QMessageBox.question(
                     self, "Clear Bill", "Hold this bill before clearing?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
@@ -1716,7 +1716,7 @@ class MainWindow(QMainWindow):
             self._save_current_tab_state()
 
         tab_to_close = self.tabs[index]
-        if tab_to_close.items and len(tab_to_close.items) > 0:
+        if not force and tab_to_close.items and len(tab_to_close.items) > 0:
             reply = QMessageBox.question(
                 self, "Close Bill Tab",
                 f"Bill Tab #{index + 1} ({tab_to_close.customer_name}) has {len(tab_to_close.items)} items.\n\n"
