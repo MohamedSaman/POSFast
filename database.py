@@ -12,28 +12,71 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
 
-if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DB_PATH = os.path.join(BASE_DIR, "pos_local.db")
+def get_app_data_dir() -> str:
+    """
+    Returns a safe, writable directory for databases and receipts.
+    If the application directory is writable (e.g. portable mode or development),
+    it is preferred. If installed in Program Files or a read-only directory,
+    it falls back to %LOCALAPPDATA%\FastPOS or ~/.fastpos.
+    """
+    if getattr(sys, 'frozen', False):
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        app_dir = os.path.dirname(os.path.abspath(__file__))
 
-# If pos_local.db does not exist in BASE_DIR (e.g. dist/FastPOS), check if pos_default.db or pos_local.db is available
+    # Check if app_dir is writable
+    is_writable = False
+    if "Program Files" not in app_dir:
+        try:
+            test_path = os.path.join(app_dir, ".perm_test")
+            with open(test_path, "w") as f:
+                f.write("test")
+            os.remove(test_path)
+            is_writable = True
+        except Exception:
+            is_writable = False
+
+    if is_writable:
+        return app_dir
+
+    # Fallback to user AppData
+    if sys.platform == 'win32':
+        base = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA') or os.path.expanduser('~')
+        data_dir = os.path.join(base, "FastPOS")
+    else:
+        data_dir = os.path.join(os.path.expanduser('~'), ".fastpos")
+
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+    except Exception:
+        pass
+    return data_dir
+
+APP_DATA_DIR = get_app_data_dir()
+DEFAULT_DB_PATH = os.path.join(APP_DATA_DIR, "pos_local.db")
+
+# If pos_local.db does not exist in APP_DATA_DIR, check candidate locations to seed it
 if not os.path.exists(DEFAULT_DB_PATH):
-    for candidate_name in ["pos_default.db", "pos_local.db"]:
-        cur_c = os.path.join(BASE_DIR, candidate_name)
-        if os.path.exists(cur_c) and cur_c != DEFAULT_DB_PATH:
+    candidates = []
+    if getattr(sys, 'frozen', False):
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+
+    if hasattr(sys, '_MEIPASS'):
+        candidates.append(os.path.join(sys._MEIPASS, "pos_default.db"))
+        candidates.append(os.path.join(sys._MEIPASS, "pos_local.db"))
+    candidates.extend([
+        os.path.join(app_dir, "pos_default.db"),
+        os.path.join(app_dir, "pos_local.db"),
+        os.path.join(os.path.dirname(app_dir), "pos_default.db"),
+        os.path.join(os.path.dirname(app_dir), "pos_local.db")
+    ])
+    for cur_c in candidates:
+        if cur_c and os.path.exists(cur_c) and os.path.abspath(cur_c) != os.path.abspath(DEFAULT_DB_PATH):
             try:
                 import shutil
                 shutil.copy2(cur_c, DEFAULT_DB_PATH)
-                break
-            except Exception:
-                pass
-        parent_c = os.path.join(os.path.dirname(BASE_DIR), candidate_name)
-        if os.path.exists(parent_c):
-            try:
-                import shutil
-                shutil.copy2(parent_c, DEFAULT_DB_PATH)
                 break
             except Exception:
                 pass

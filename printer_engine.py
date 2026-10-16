@@ -22,11 +22,9 @@ try:
 except Exception:  # pragma: no cover
     Code128 = None
 
-if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RECEIPTS_DIR = os.path.join(BASE_DIR, "receipts")
+from database import get_app_data_dir
+APP_DATA_DIR = get_app_data_dir()
+RECEIPTS_DIR = os.path.join(APP_DATA_DIR, "receipts")
 
 DEFAULT_BRANDING = {
     "shop_name": "JAFFNA GOLD COVERING",
