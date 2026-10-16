@@ -2526,6 +2526,8 @@ class MainWindow(QMainWindow):
                 self._scan_buffer = ""
                 if scanned:
                     prod = self.db.get_product_by_code(scanned)
+                    if not prod and hasattr(self, 'sync_worker') and self.sync_worker:
+                        prod = self.sync_worker.lookup_remote_product(scanned)
                     if prod:
                         cur_row = self.table.rowCount() - 1
                         if cur_row < 0:

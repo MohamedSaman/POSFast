@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QWidget, QHBoxLayout, QPushButton,
     QHeaderView, QAbstractItemView, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QEvent, QRect, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QEvent, QRect, QTimer, QObject
 from PyQt6.QtGui import QColor, QFont, QPainter, QKeyEvent, QBrush, QPen
 
 from database import DatabaseManager
@@ -137,6 +137,10 @@ class ProductSearchLineEdit(QLineEdit):
         self.theme_mode = theme_mode
         self.popup = SuggestPopup(theme_mode=theme_mode)
         self.popup.item_chosen.connect(self._apply_product)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(75)  # 75ms debounce so rapid barcode scans do not flash popup
+        self._search_timer.timeout.connect(self._do_search)
         self.textChanged.connect(self._on_text_changed)
         self.apply_theme(theme_mode)
 
@@ -170,6 +174,14 @@ class ProductSearchLineEdit(QLineEdit):
     def _on_text_changed(self, text: str):
         query = text.strip()
         if not query:
+            self._search_timer.stop()
+            self.popup.hide()
+            return
+        self._search_timer.start()
+
+    def _do_search(self):
+        query = self.text().strip()
+        if not query:
             self.popup.hide()
             return
 
@@ -200,12 +212,52 @@ class ProductSearchLineEdit(QLineEdit):
         self.popup.move(global_pos)
 
     def _apply_product(self, product: dict):
+        self._search_timer.stop()
         self.popup.hide()
         self.popup.clear()
         self.blockSignals(True)
         self.setText(product["name"])
         self.blockSignals(False)
         self.product_selected.emit(product)
+
+    def _resolve_and_commit(self):
+        """Resolves current scanned or typed text immediately."""
+        self._search_timer.stop()
+        had_popup = self.popup.isVisible() and self.popup.count() > 0
+        self.popup.hide()
+
+        current_text = self.text().strip()
+        if not current_text:
+            self.empty_enter_pressed.emit()
+            return
+
+        # 1. Local database lookup (exact barcode, SKU, ID, suffix, prefix)
+        found = self.db.get_product_by_code(current_text)
+
+        # 2. Remote lookup fallback if not found locally
+        if not found:
+            table = self.parent()
+            while table and not hasattr(table, 'lookup_remote_product'):
+                table = table.parent()
+            if table and hasattr(table, 'lookup_remote_product'):
+                found = table.lookup_remote_product(current_text)
+
+        # 3. If found locally or remotely: apply immediately
+        if found:
+            self._apply_product(found)
+            return
+
+        # 4. If user was typing and popup had items, select top match
+        if had_popup and self.popup.count() > 0:
+            top_item = self.popup.currentItem() or self.popup.item(0)
+            if top_item:
+                prod = top_item.data(Qt.ItemDataRole.UserRole)
+                if prod:
+                    self._apply_product(prod)
+                    return
+
+        # 5. Custom item name or unresolved code fallback
+        self.single_enter_confirmed.emit(current_text)
 
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
@@ -221,37 +273,21 @@ class ProductSearchLineEdit(QLineEdit):
                 if cur > 0:
                     self.popup.setCurrentRow(cur - 1)
                 return
-            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                current_text = self.text().strip()
-                exact = self.db.get_product_by_code(current_text)
-                if exact:
-                    self._apply_product(exact)
-                else:
-                    self.popup.choose_current()
-                return
             elif key == Qt.Key.Key_Escape:
+                self._search_timer.stop()
                 self.popup.hide()
                 return
 
-        # Popup is not visible
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            current_text = self.text().strip()
-            if not current_text:
-                self.empty_enter_pressed.emit()
-                return
-
-            # Check if typed exact barcode or SKU or exact name or suffix
-            found = self.db.get_product_by_code(current_text)
-            if found:
-                self._apply_product(found)
-            else:
-                self.single_enter_confirmed.emit(current_text)
+            self._resolve_and_commit()
             return
 
         super().keyPressEvent(event)
 
     def hideEvent(self, event):
         try:
+            if hasattr(self, '_search_timer'):
+                self._search_timer.stop()
             if self.popup:
                 self.popup.hide()
         except (RuntimeError, SystemError, Exception):
@@ -269,6 +305,17 @@ class ProductSuggestDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.db = db
         self.table = table
+
+    def eventFilter(self, editor: QObject, event: QEvent) -> bool:
+        if isinstance(editor, ProductSearchLineEdit) and event.type() == QEvent.Type.KeyPress:
+            key_event = event
+            if key_event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                editor._resolve_and_commit()
+                return True
+            elif key_event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up) and editor.popup.isVisible():
+                editor.keyPressEvent(key_event)
+                return True
+        return super().eventFilter(editor, event)
 
     def createEditor(self, parent: QWidget, option, index) -> QWidget:
         if index.column() == COL_NAME:
@@ -558,6 +605,17 @@ class POSBillingTable(QTableWidget):
         else:
             QTimer.singleShot(10, lambda: self.focus_cell(row, COL_QTY, edit=True, select_all=True))
 
+    def lookup_remote_product(self, term: str) -> Optional[dict]:
+        """Queries the live cloud backend on demand when an un-cached code is scanned."""
+        try:
+            win = self.window()
+            worker = getattr(win, 'sync_worker', None)
+            if worker and hasattr(worker, 'lookup_remote_product'):
+                return worker.lookup_remote_product(term)
+        except Exception as e:
+            print(f"[POSBillingTable] Remote lookup error: {e}")
+        return None
+
     def on_single_enter_confirmed(self, row: int, typed_text: str = ""):
         """Cashier pressed Enter on Product Name with custom text or unresolved code."""
         self.empty_enter_count = 0
@@ -566,12 +624,14 @@ class POSBillingTable(QTableWidget):
 
         # Try resolving code via database (exact, suffix, prefix)
         found = self.db.get_product_by_code(typed) if typed else None
+        if not found and typed:
+            found = self.lookup_remote_product(typed)
         if found:
             self.on_product_selected(row, found)
             return
 
         # Barcode / SKU-like text that matched no product: reject and clear cell
-        if typed and any(c.isdigit() for c in typed) and len(typed) >= 4:
+        if typed and any(c.isdigit() for c in typed) and len(typed) >= 3:
             self.blockSignals(True)
             if name_item:
                 name_item.setText("")
@@ -584,7 +644,7 @@ class POSBillingTable(QTableWidget):
                 editor.clear()
                 editor.blockSignals(False)
 
-            self.status_message.emit(f"✕ Product not found for code: {typed} (Press F10 to sync catalog)")
+            self.status_message.emit(f"✕ Product not found for code: '{typed}' (Press F10 to sync catalog)")
             QTimer.singleShot(20, lambda: self.focus_cell(row, COL_NAME, edit=True))
             return
 

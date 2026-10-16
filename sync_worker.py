@@ -211,7 +211,8 @@ class SyncWorker(QThread):
                         has_more = bool(data.get("has_more"))
                     if products:
                         total_upserted += self.db.upsert_products(products)
-                    if not has_more:
+                    should_continue = has_more or len(products) >= 500
+                    if not should_continue:
                         completed = True
                         break
                     page += 1
@@ -225,6 +226,64 @@ class SyncWorker(QThread):
                 print(f"[SyncWorker] Product pull error at {ep}: {e}")
                 continue
         return 0
+
+    def lookup_remote_product(self, code_or_term: str) -> Optional[Dict[str, Any]]:
+        """
+        Instant on-demand product lookup directly against live backend.
+        Used as immediate fallback when an un-cached QR code, barcode, or suffix is scanned/entered.
+        Saves found product into SQLite and returns the product dict.
+        """
+        term = (code_or_term or "").strip()
+        if not term:
+            return None
+
+        # Clean term if URL or AIM symbology
+        if "product-image/" in term:
+            term = term.rstrip("/").split("/")[-1]
+        elif term.startswith("]Q") or term.startswith("]E") or term.startswith("]C"):
+            term = term[3:]
+
+        settings = self.db.get_all_settings()
+        tenant = settings.get("tenant_subdomain", "https://jaffnagold.com")
+        base_domain = settings.get("base_domain", "webxkey.lk")
+        token = settings.get("api_token", "")
+        terminal = settings.get("terminal_id", "POS-01")
+
+        base_url = self.build_base_url(tenant, base_domain)
+        headers = self.get_headers(token, terminal)
+
+        alt_base = base_url.replace("/api/v1", "/api") if "/api/v1" in base_url else base_url
+        endpoints = [
+            f"{base_url}/pos/products/sync?search={term}&per_page=10",
+            f"{base_url}/pos/products?search={term}&per_page=10",
+            f"{alt_base}/pos/products/sync?search={term}&per_page=10",
+            f"{alt_base}/products?search={term}"
+        ]
+
+        if "127.0.0.1" not in base_url and "localhost" not in base_url:
+            endpoints.append(f"http://127.0.0.1:8000/api/v1/pos/products/sync?search={term}&per_page=10")
+
+        for ep in endpoints:
+            try:
+                resp = requests.get(ep, headers=headers, timeout=2.5, verify=False)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                products = []
+                if isinstance(data, list):
+                    products = data
+                elif isinstance(data, dict):
+                    products = data.get("products") or data.get("data") or []
+                if products:
+                    self.db.upsert_products(products)
+                    # Verify the queried term actually matches an upserted product
+                    found = self.db.get_product_by_code(term)
+                    if found:
+                        return found
+            except Exception as e:
+                continue
+
+        return None
 
     def pull_domain_sales(self, target_date: Optional[str] = None, limit: int = 50) -> Tuple[bool, int, float, str]:
         """

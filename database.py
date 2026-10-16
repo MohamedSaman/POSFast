@@ -299,34 +299,45 @@ class DatabaseManager:
 
     @staticmethod
     def _extract_scan_code(raw: str) -> List[str]:
-        """Returns candidate codes from a barcode/QR payload (plain, URL, JSON, 'BARCODE:xxx')."""
+        """Returns candidate codes from a barcode/QR payload (plain, URL, JSON, AIM prefix, 'BARCODE:xxx')."""
         from urllib.parse import urlparse, parse_qs
         import re
-        cleaned = (raw or "").replace("\xa0", " ").strip()
-        candidates = [cleaned]
-        if cleaned.startswith("{") and cleaned.endswith("}"):
-            try:
-                data = json.loads(cleaned)
-                for k in ("barcode", "code", "sku", "product_code", "id"):
-                    if data.get(k):
-                        candidates.append(str(data[k]).strip())
-            except Exception:
-                pass
-        if cleaned.lower().startswith(("http://", "https://")):
-            try:
-                parsed = urlparse(cleaned)
-                qs = parse_qs(parsed.query)
-                for k in ("barcode", "code", "sku", "id"):
-                    if qs.get(k):
-                        candidates.append(qs[k][0].strip())
-                parts = [p for p in parsed.path.split("/") if p]
-                if parts:
-                    candidates.append(parts[-1].strip())
-            except Exception:
-                pass
-        m = re.match(r"^(?:barcode|sku|code|prod|id)[\s:=]+(.*)$", cleaned, re.IGNORECASE)
-        if m:
-            candidates.append(m.group(1).strip())
+        # Strip non-printable control characters
+        raw_clean = re.sub(r"[\x00-\x1f\x7f]", "", raw or "").replace("\xa0", " ").strip()
+        candidates = [raw_clean]
+
+        # Handle AIM symbology prefixes common on 2D QR/barcode scanners (e.g. ']Q1', ']Q2', ']E0', ']C0', ']d1')
+        aim_match = re.match(r"^\][a-zA-Z0-9]{2,3}(.+)$", raw_clean)
+        if aim_match:
+            stripped = aim_match.group(1).strip()
+            if stripped:
+                candidates.insert(0, stripped)
+
+        for text in list(candidates):
+            if text.startswith("{") and text.endswith("}"):
+                try:
+                    data = json.loads(text)
+                    for k in ("barcode", "code", "sku", "product_code", "id"):
+                        if data.get(k):
+                            candidates.append(str(data[k]).strip())
+                except Exception:
+                    pass
+            if text.lower().startswith(("http://", "https://")):
+                try:
+                    parsed = urlparse(text)
+                    qs = parse_qs(parsed.query)
+                    for k in ("barcode", "code", "sku", "id", "search"):
+                        if qs.get(k):
+                            candidates.append(qs[k][0].strip())
+                    parts = [p for p in parsed.path.split("/") if p]
+                    if parts:
+                        candidates.append(parts[-1].strip())
+                except Exception:
+                    pass
+            m = re.match(r"^(?:barcode|sku|code|prod|id)[\s:=]+(.*)$", text, re.IGNORECASE)
+            if m:
+                candidates.append(m.group(1).strip())
+
         return [c for c in dict.fromkeys(candidates) if c]
 
     def get_product_count(self) -> int:
@@ -364,10 +375,10 @@ class DatabaseManager:
                 if row:
                     return dict(row)
 
-            # Pass 2: Suffix match (Very common for EAN-13 barcodes where internal item code is last 4-8 digits, e.g. 509061 -> 2001073509061)
+            # Pass 2: Suffix match (Common for EAN-13 barcodes where internal item code is last digits, e.g. 91249 -> 2001106191249)
             for cand in candidates:
                 cand_clean = cand.strip()
-                if len(cand_clean) >= 4 and any(c.isalnum() for c in cand_clean):
+                if len(cand_clean) >= 3 and any(c.isalnum() for c in cand_clean):
                     cursor.execute("""
                         SELECT * FROM products 
                         WHERE barcode LIKE ? 
@@ -382,7 +393,7 @@ class DatabaseManager:
             # Pass 3: Prefix match (e.g. barcode starts with scanned code)
             for cand in candidates:
                 cand_clean = cand.strip()
-                if len(cand_clean) >= 4 and any(c.isalnum() for c in cand_clean):
+                if len(cand_clean) >= 3 and any(c.isalnum() for c in cand_clean):
                     cursor.execute("""
                         SELECT * FROM products 
                         WHERE barcode LIKE ? 
