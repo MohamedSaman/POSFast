@@ -28,17 +28,27 @@ jobs:
       run: |
         pyinstaller --clean -y FastPOS.spec
 
-    - name: Build Standalone Single-File Executable
-      run: |
-        pyinstaller --clean -y --onefile --windowed --icon=icon.ico --add-data="icon.png;." --add-data="icon.ico;." --add-data="pos_default.db;." --hidden-import=PyQt6 --hidden-import=PyQt6.QtCore --hidden-import=PyQt6.QtGui --hidden-import=PyQt6.QtWidgets --hidden-import=PyQt6.QtPrintSupport --hidden-import=jinja2 --hidden-import=requests --hidden-import=barcode --hidden-import=barcode.codex --hidden-import=sqlite3 --name="FastPOS_Portable" main.py
-
     - name: Install Inno Setup
       run: |
         choco install innosetup --no-progress -y
 
     - name: Compile Windows Setup Wizard (FastPOS_Setup_v1.0.exe)
+      shell: pwsh
       run: |
-        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        $isccPath = "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe"
+        if (-not (Test-Path $isccPath)) {
+            $isccPath = "$env:ProgramFiles\Inno Setup 6\iscc.exe"
+        }
+        if (-not (Test-Path $isccPath)) {
+            $cmd = Get-Command iscc.exe -ErrorAction SilentlyContinue
+            if ($cmd) { $isccPath = $cmd.Source }
+        }
+        Write-Host "Using ISCC compiler at: $isccPath"
+        & $isccPath installer.iss
+
+    - name: Build Standalone Single-File Executable
+      run: |
+        pyinstaller -y --onefile --windowed --icon=icon.ico --distpath dist_portable --add-data="icon.png;." --add-data="icon.ico;." --add-data="pos_default.db;." --hidden-import=PyQt6 --hidden-import=PyQt6.QtCore --hidden-import=PyQt6.QtGui --hidden-import=PyQt6.QtWidgets --hidden-import=PyQt6.QtPrintSupport --hidden-import=jinja2 --hidden-import=requests --hidden-import=barcode --hidden-import=barcode.codex --hidden-import=sqlite3 --name="FastPOS_Portable" main.py
 
     - name: Upload Windows Setup Wizard (Like Chrome / WhatsApp)
       uses: actions/upload-artifact@v4
@@ -51,5 +61,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: FastPOS-Windows-Portable-EXE
-        path: dist/FastPOS_Portable.exe
+        path: dist_portable/FastPOS_Portable.exe
         retention-days: 30
