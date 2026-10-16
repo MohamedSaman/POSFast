@@ -367,6 +367,13 @@ def run_tests():
 
     chk.close()
 
+    # Verify AsyncSmsWorker has sms_finished signal
+    from sms_service import AsyncSmsWorker
+    sms_w = AsyncSmsWorker({"bill_no": "#TEST", "customer_phone": "0771234567"}, db)
+    assert hasattr(sms_w, 'sms_finished')
+    sms_w.sms_finished.connect(lambda ok, msg: None)
+    print("✓ AsyncSmsWorker initialized with valid sms_finished signal")
+
     print("\n===========================================================")
     print("ALL 14 ARCHITECTURAL, SCANNER & SETTINGS TESTS PASSED!")
     print("===========================================================\n")

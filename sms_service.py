@@ -212,7 +212,8 @@ class FastPOSSmsService:
 
 class AsyncSmsWorker(QThread):
     """Background worker thread to dispatch SMS without blocking PyQt UI."""
-    finished = pyqtSignal(bool, str)
+    sms_finished = pyqtSignal(bool, str)
+    sms_result = pyqtSignal(bool, str)
 
     def __init__(self, inv_or_phone, message_or_db, db=None):
         super().__init__()
@@ -232,4 +233,5 @@ class AsyncSmsWorker(QThread):
             ok, msg = FastPOSSmsService.send_bill_invoice_sms(self.inv, self.db)
         else:
             ok, msg = FastPOSSmsService.send_sms(self.phone, self.message, self.db)
-        self.finished.emit(ok, msg)
+        self.sms_finished.emit(ok, msg)
+        self.sms_result.emit(ok, msg)
