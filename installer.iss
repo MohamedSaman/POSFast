@@ -10,6 +10,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\FastPOS
+PrivilegesRequiredOverridesAllowed=commandline dialog
 DisableProgramGroupPage=yes
 OutputDir=dist
 OutputBaseFilename=FastPOS_Setup_v1.0
@@ -27,6 +28,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "dist\FastPOS\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "pos_default.db"; DestDir: "{app}"; DestName: "pos_local.db"; Flags: ignoreversion onlyifdoesntexist
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"
