@@ -31,6 +31,8 @@ class CheckoutDialog(QDialog):
     """Payment & Print modal triggered by [F5] or Double-Enter on empty row."""
     def __init__(self, grand_total: Decimal, default_method: str = "CASH", theme_mode: str = "dark", parent=None, customer_name: str = "Walk-In", customer_phone: str = "", auto_sms_enabled: bool = True):
         super().__init__(parent)
+        self.original_grand_total = grand_total
+        self.extra_discount = Decimal('0.00')
         self.grand_total = grand_total
         self.payment_method = default_method
         self.paid_amount = grand_total
@@ -44,7 +46,7 @@ class CheckoutDialog(QDialog):
         self.send_sms = False
 
         self.setWindowTitle("Checkout & Payment (F5)")
-        self.setFixedSize(520, 600)
+        self.setFixedSize(540, 650)
         self.setModal(True)
         self.init_ui()
 
@@ -79,13 +81,99 @@ class CheckoutDialog(QDialog):
         tot_layout = QVBoxLayout(tot_card)
         tot_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        lbl_tot_desc = QLabel("AMOUNT DUE")
-        lbl_tot_desc.setStyleSheet(f"color: {t['text_muted']}; font-size: 13px; font-weight: bold;")
+        self.lbl_tot_desc = QLabel("AMOUNT DUE")
+        self.lbl_tot_desc.setStyleSheet(f"color: {t['text_muted']}; font-size: 13px; font-weight: bold;")
         self.lbl_grand_val = QLabel(f"Rs. {self.grand_total:.2f}")
         self.lbl_grand_val.setStyleSheet(f"color: {t['success']}; font-size: 36px; font-weight: bold; min-height: 44px;")
-        tot_layout.addWidget(lbl_tot_desc, alignment=Qt.AlignmentFlag.AlignCenter)
+        tot_layout.addWidget(self.lbl_tot_desc, alignment=Qt.AlignmentFlag.AlignCenter)
         tot_layout.addWidget(self.lbl_grand_val, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(tot_card)
+
+        # Global Bill Discount & Round-Off Card
+        disc_card = QFrame()
+        disc_card.setObjectName("checkoutDiscCard")
+        disc_card.setStyleSheet(f"""
+            #checkoutDiscCard {{
+                background-color: {t['bg_card_inner']};
+                border: 1px solid {t['border']};
+                border-radius: 8px;
+                padding: 6px 12px;
+            }}
+            #checkoutDiscCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        disc_layout = QHBoxLayout(disc_card)
+        disc_layout.setContentsMargins(8, 4, 8, 4)
+        disc_layout.setSpacing(8)
+
+        lbl_disc = QLabel("🏷️ Extra Discount / Round-off:")
+        lbl_disc.setStyleSheet(f"color: {t['text_primary']}; font-size: 13px; font-weight: bold;")
+        disc_layout.addWidget(lbl_disc)
+
+        self.txt_discount = QLineEdit("0.00")
+        self.txt_discount.setPlaceholderText("0.00")
+        self.txt_discount.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.txt_discount.setFixedWidth(110)
+        self.txt_discount.setFixedHeight(34)
+        self.txt_discount.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {t['bg_input']};
+                color: {t['accent']};
+                border: 2px solid {t['accent']};
+                border-radius: 5px;
+                padding: 4px 8px;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {t['accent']};
+                background-color: {t['bg_card']};
+            }}
+        """)
+        self.txt_discount.textChanged.connect(self._on_discount_changed)
+        self.txt_discount.installEventFilter(self)
+        disc_layout.addWidget(self.txt_discount)
+
+        # Quick round helper buttons
+        self.btn_round_none = QPushButton("Rs. 0")
+        self.btn_round_none.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_round_none.setFixedHeight(30)
+        self.btn_round_none.setToolTip("Clear extra discount (0.00)")
+        self.btn_round_none.clicked.connect(lambda: self.set_quick_discount(Decimal('0.00')))
+
+        self.btn_round_50 = QPushButton("Round 50")
+        self.btn_round_50.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_round_50.setFixedHeight(30)
+        self.btn_round_50.setToolTip("Round down to nearest 50")
+        self.btn_round_50.clicked.connect(lambda: self.round_down_to(Decimal('50.00')))
+
+        self.btn_round_100 = QPushButton("Round 100")
+        self.btn_round_100.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_round_100.setFixedHeight(30)
+        self.btn_round_100.setToolTip("Round down to nearest 100 (e.g. 3250 -> 3200)")
+        self.btn_round_100.clicked.connect(lambda: self.round_down_to(Decimal('100.00')))
+
+        for rb in (self.btn_round_none, self.btn_round_50, self.btn_round_100):
+            rb.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {t['btn_default_bg']};
+                    color: {t['text_secondary']};
+                    border: 1px solid {t['border']};
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: {t['border']};
+                    color: {t['text_primary']};
+                }}
+            """)
+            disc_layout.addWidget(rb)
+
+        layout.addWidget(disc_card)
 
         # Customer Name & Phone Fields
         cust_row = QHBoxLayout()
@@ -274,23 +362,82 @@ class CheckoutDialog(QDialog):
 
         layout.addLayout(btn_box)
 
-        # Initialize method state and set initial focus directly on active payment method button
+        # Initialize method state
         self.set_method(self.payment_method)
-        idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
-        self.method_buttons[idx].setFocus()
 
     def showEvent(self, event):
         super().showEvent(event)
-        idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
-        QTimer.singleShot(10, lambda: self.method_buttons[idx].setFocus())
+        QTimer.singleShot(15, self._focus_discount)
+
+    def _focus_discount(self):
+        if hasattr(self, 'txt_discount'):
+            self.txt_discount.setFocus()
+            self.txt_discount.selectAll()
+
+    def _on_discount_changed(self):
+        val_str = self.txt_discount.text().strip()
+        try:
+            extra = Decimal(val_str) if val_str else Decimal('0.00')
+        except Exception:
+            extra = Decimal('0.00')
+
+        if extra < 0:
+            extra = Decimal('0.00')
+        if extra > self.original_grand_total:
+            extra = self.original_grand_total
+
+        self.extra_discount = extra
+        self.grand_total = self.original_grand_total - self.extra_discount
+        self.lbl_grand_val.setText(f"Rs. {self.grand_total:.2f}")
+
+        if self.extra_discount > 0:
+            self.lbl_tot_desc.setText(f"AMOUNT DUE (Orig: Rs. {self.original_grand_total:.2f} - Disc: Rs. {self.extra_discount:.2f})")
+        else:
+            self.lbl_tot_desc.setText("AMOUNT DUE")
+
+        # Update default amount tendered to match new grand total
+        self.txt_paid.setText(f"{self.grand_total:.2f}")
+        self._refresh_quick_buttons()
+        self.calculate_change()
+
+    def set_quick_discount(self, disc_amt: Decimal):
+        disc_amt = max(Decimal('0.00'), min(disc_amt, self.original_grand_total))
+        self.txt_discount.setText(f"{disc_amt:.2f}")
+        self.txt_discount.selectAll()
+        self.txt_discount.setFocus()
+
+    def round_down_to(self, step: Decimal):
+        if step <= 0 or self.original_grand_total <= 0:
+            return
+        rounded_total = (self.original_grand_total // step) * step
+        diff = self.original_grand_total - rounded_total
+        self.set_quick_discount(diff)
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
 
+            # When user is on Global Discount field
+            if hasattr(self, 'txt_discount') and watched == self.txt_discount:
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
+                    # Enter or Down Arrow confirms discount and jumps to Payment Methods
+                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                    self.method_buttons[cur_idx].setFocus()
+                    return True
+                elif key == Qt.Key.Key_Tab:
+                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                    self.method_buttons[cur_idx].setFocus()
+                    return True
+
             # When user is on payment method buttons
-            if watched in self.method_buttons:
-                if key in (Qt.Key.Key_Right, Qt.Key.Key_Tab):
+            elif watched in self.method_buttons:
+                if key == Qt.Key.Key_Up:
+                    # Up Arrow jumps back to Discount field
+                    if hasattr(self, 'txt_discount'):
+                        self.txt_discount.setFocus()
+                        self.txt_discount.selectAll()
+                    return True
+                elif key in (Qt.Key.Key_Right, Qt.Key.Key_Tab):
                     cur_idx = self.methods.index(self.payment_method)
                     next_idx = (cur_idx + 1) % len(self.methods)
                     self.set_method(self.methods[next_idx])
@@ -312,7 +459,7 @@ class CheckoutDialog(QDialog):
             elif watched == self.txt_paid:
                 if key == Qt.Key.Key_Up:
                     # Up Arrow jumps back to Payment Methods
-                    cur_idx = self.methods.index(self.payment_method)
+                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
                     self.method_buttons[cur_idx].setFocus()
                     return True
                 elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -477,8 +624,18 @@ class CheckoutDialog(QDialog):
             self.reject()
             return
 
-        if not self.txt_paid.hasFocus():
-            if key in (Qt.Key.Key_Right, Qt.Key.Key_Tab):
+        if hasattr(self, 'txt_discount') and self.txt_discount.hasFocus():
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
+                cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                self.method_buttons[cur_idx].setFocus()
+                return
+        elif not self.txt_paid.hasFocus():
+            if key == Qt.Key.Key_Up:
+                if hasattr(self, 'txt_discount'):
+                    self.txt_discount.setFocus()
+                    self.txt_discount.selectAll()
+                return
+            elif key in (Qt.Key.Key_Right, Qt.Key.Key_Tab):
                 cur_idx = self.methods.index(self.payment_method)
                 next_idx = (cur_idx + 1) % len(self.methods)
                 self.set_method(self.methods[next_idx])
@@ -499,7 +656,7 @@ class CheckoutDialog(QDialog):
                 self.confirm_payment()
                 return
             elif key == Qt.Key.Key_Up:
-                cur_idx = self.methods.index(self.payment_method)
+                cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
                 self.method_buttons[cur_idx].setFocus()
                 return
         super().keyPressEvent(event)
@@ -2125,14 +2282,18 @@ class MainWindow(QMainWindow):
             is_online = self.sync_worker.is_online if self.sync_worker else False
             initial_synced = 0 # Saved locally first; worker will push if online
 
+            extra_disc = getattr(checkout_dlg, 'extra_discount', Decimal('0.00'))
+            final_grand_total = checkout_dlg.grand_total
+            final_total_discount = self.discount_total + extra_disc
+
             invoice_record = {
                 "bill_no": self.current_bill_no,
                 "customer_name": self.current_customer,
                 "customer_phone": self.current_customer_phone,
                 "subtotal": float(self.subtotal),
-                "discount": float(self.discount_total),
+                "discount": float(final_total_discount),
                 "tax": float(self.tax_total),
-                "grand_total": float(self.grand_total),
+                "grand_total": float(final_grand_total),
                 "paid_amount": float(checkout_dlg.paid_amount),
                 "due_amount": float(checkout_dlg.due_amount),
                 "payment_method": checkout_dlg.payment_method,
@@ -2164,7 +2325,7 @@ class MainWindow(QMainWindow):
             pending = self.db.get_pending_invoice_count()
             self.update_pending_storage_display(pending, is_online)
 
-            self.show_status_bar_message(f"Bill {self.current_bill_no} finalized! (Rs. {self.grand_total:.2f})")
+            self.show_status_bar_message(f"Bill {self.current_bill_no} finalized! (Rs. {final_grand_total:.2f})")
 
             # Advance to next new bill or switch to remaining tab
             if len(self.tabs) > 1:

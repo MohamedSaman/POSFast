@@ -322,13 +322,57 @@ def run_tests():
     assert len(window.tabs) == 1
     assert window.active_tab_idx == 0
     assert window.table.rowCount() == 1
-    print("✓ Window UI successfully reset to clean state on database cleared signal.")
+    # --- TEST 14: Global Bill Discount, Round-Off & Keyboard Navigation Flow ---
+    print("\n--- TEST 14: Global Bill Discount, Round-Off & Keyboard Navigation Flow ---")
+    from ui_main import CheckoutDialog
+    from PyQt6.QtGui import QKeyEvent
+    from PyQt6.QtCore import QEvent
+
+    chk = CheckoutDialog(Decimal('3250.00'), default_method="CASH", theme_mode="dark")
+    assert chk.original_grand_total == Decimal('3250.00')
+    assert chk.grand_total == Decimal('3250.00')
+    assert chk.txt_discount.text() == "0.00"
+
+    # Test round down to nearest 100 (3250 -> 3200, discount = 50)
+    chk.round_down_to(Decimal('100.00'))
+    assert chk.extra_discount == Decimal('50.00')
+    assert chk.grand_total == Decimal('3200.00')
+    assert chk.txt_paid.text() == "3200.00"
+    print("✓ Round 100 helper verified: 3250.00 rounded to 3200.00 with 50.00 discount")
+
+    # Test manual entry in discount box
+    chk.txt_discount.setText("250.00")
+    assert chk.extra_discount == Decimal('250.00')
+    assert chk.grand_total == Decimal('3000.00')
+    assert chk.txt_paid.text() == "3000.00"
+    print("✓ Manual discount verified: Rs. 250 discount updated total to Rs. 3000.00")
+
+    chk.show()
+    app.processEvents()
+
+    # Test navigation: Enter on txt_discount jumps to Payment Method button
+    enter_ev = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+    handled = chk.eventFilter(chk.txt_discount, enter_ev)
+    assert handled is True
+    app.processEvents()
+    assert chk.method_buttons[0].hasFocus()
+    print("✓ Enter on discount field successfully focused CASH payment method button")
+
+    # Enter on payment method button jumps to Amount Tendered
+    handled_pm = chk.eventFilter(chk.method_buttons[0], enter_ev)
+    assert handled_pm is True
+    app.processEvents()
+    assert chk.txt_paid.hasFocus()
+    print("✓ Enter on CASH button successfully focused Amount Tendered field")
+
+    chk.close()
 
     print("\n===========================================================")
-    print("ALL 13 ARCHITECTURAL, SCANNER & SETTINGS TESTS PASSED!")
+    print("ALL 14 ARCHITECTURAL, SCANNER & SETTINGS TESTS PASSED!")
     print("===========================================================\n")
 
 
 if __name__ == "__main__":
     run_tests()
+
 
