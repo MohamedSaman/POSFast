@@ -14,7 +14,8 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QFrame, QSplitter, QDialog, 
     QMessageBox, QListWidget, QListWidgetItem, QDialogButtonBox,
     QCheckBox, QGridLayout, QSizePolicy, QApplication, QScrollArea,
-    QTextEdit, QPlainTextEdit
+    QTextEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QHeaderView
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent
 from PyQt6.QtGui import QFont, QIcon, QKeyEvent, QColor
