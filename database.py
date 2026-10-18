@@ -145,6 +145,7 @@ class DatabaseManager:
                     tax REAL DEFAULT 0.0,
                     grand_total REAL NOT NULL,
                     payment_method TEXT DEFAULT 'CASH',
+                    split_payments TEXT,
                     items_json TEXT NOT NULL,
                     is_synced INTEGER DEFAULT 0,
                     customer_phone TEXT,
@@ -165,6 +166,8 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN paid_amount REAL;")
             if "due_amount" not in columns:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN due_amount REAL DEFAULT 0.0;")
+            if "split_payments" not in columns:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN split_payments TEXT;")
 
             # 4. Held / Parked Bills Table (for F3 Hold / F4 Recall)
             cursor.execute("""
@@ -515,12 +518,19 @@ class DatabaseManager:
 
             paid_amount = float(data.get("paid_amount", data["grand_total"]))
             due_amount = float(data.get("due_amount", 0.0))
+            split_payments = data.get("split_payments")
+            if isinstance(split_payments, (dict, list)):
+                split_payments_json = json.dumps(split_payments)
+            elif isinstance(split_payments, str):
+                split_payments_json = split_payments
+            else:
+                split_payments_json = None
 
             cursor.execute("""
                 INSERT INTO invoices (
                     bill_no, customer_name, customer_phone, subtotal, discount, tax, 
-                    grand_total, paid_amount, due_amount, payment_method, items_json, is_synced, sms_sent, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    grand_total, paid_amount, due_amount, payment_method, split_payments, items_json, is_synced, sms_sent, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 bill_no,
                 data.get("customer_name", "Walk-In"),
@@ -532,6 +542,7 @@ class DatabaseManager:
                 paid_amount,
                 due_amount,
                 data.get("payment_method", "CASH"),
+                split_payments_json,
                 items_json,
                 is_synced,
                 int(data.get("sms_sent", 0)),
@@ -663,6 +674,13 @@ class DatabaseManager:
 
         due_amount = float(inv_data.get("due_amount", 0.0))
         paid_amount = float(inv_data.get("paid_amount", grand_total - due_amount))
+        split_payments = inv_data.get("split_payments")
+        if isinstance(split_payments, (dict, list)):
+            split_payments_json = json.dumps(split_payments)
+        elif isinstance(split_payments, str):
+            split_payments_json = split_payments
+        else:
+            split_payments_json = None
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -680,6 +698,7 @@ class DatabaseManager:
                         paid_amount = ?,
                         due_amount = ?,
                         payment_method = ?,
+                        split_payments = CASE WHEN ? IS NOT NULL THEN ? ELSE split_payments END,
                         items_json = CASE WHEN ? != '[]' THEN ? ELSE items_json END,
                         is_synced = 1
                     WHERE id = ?
@@ -689,6 +708,7 @@ class DatabaseManager:
                     subtotal, discount, tax, grand_total,
                     paid_amount, due_amount,
                     pay_method,
+                    split_payments_json, split_payments_json,
                     items_json, items_json,
                     row[0]
                 ))
@@ -698,11 +718,11 @@ class DatabaseManager:
                 cursor.execute("""
                     INSERT INTO invoices (
                         bill_no, customer_name, customer_phone, subtotal, discount, tax,
-                        grand_total, paid_amount, due_amount, payment_method, items_json, is_synced, sms_sent, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        grand_total, paid_amount, due_amount, payment_method, split_payments, items_json, is_synced, sms_sent, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     bill_no, cust_name, cust_phone, subtotal, discount, tax,
-                    grand_total, paid_amount, due_amount, pay_method, items_json, 1, sms_sent, created_at
+                    grand_total, paid_amount, due_amount, pay_method, split_payments_json, items_json, 1, sms_sent, created_at
                 ))
                 conn.commit()
                 return True

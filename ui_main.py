@@ -35,7 +35,10 @@ class CheckoutDialog(QDialog):
         self.original_grand_total = grand_total
         self.extra_discount = Decimal('0.00')
         self.grand_total = grand_total
-        self.payment_method = default_method
+        self.payment_mode = "single"  # "single" or "multiple"
+        self.split_secondary_method = "online"  # "online" (Card) or "bank_transfer"
+        self.split_payments = None
+        self.payment_method = default_method if default_method != "MULTIPLE" else "CASH"
         self.paid_amount = grand_total
         self.due_amount = Decimal('0.00')
         self.change_amount = Decimal('0.00')
@@ -47,19 +50,20 @@ class CheckoutDialog(QDialog):
         self.send_sms = False
 
         self.setWindowTitle("Checkout & Payment (F5)")
-        self.setFixedSize(540, 650)
+        self.resize(580, 780)
+        self.setMinimumSize(560, 740)
         self.setModal(True)
         self.init_ui()
 
     def init_ui(self):
         t = get_theme_tokens(self.theme_mode)
         layout = QVBoxLayout(self)
-        layout.setSpacing(14)
-        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 16, 20, 16)
 
         # Header
         lbl_title = QLabel("💳 Finalize Bill & Print")
-        lbl_title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {t['text_heading']};")
+        lbl_title.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {t['text_heading']};")
         layout.addWidget(lbl_title)
 
         # Grand Total Card
@@ -70,7 +74,7 @@ class CheckoutDialog(QDialog):
                 background-color: {t['bg_card_inner']};
                 border: 2px solid {t['success']};
                 border-radius: 8px;
-                padding: 12px;
+                padding: 8px 12px;
             }}
             #checkoutTotCard QLabel {{
                 background: transparent;
@@ -80,12 +84,14 @@ class CheckoutDialog(QDialog):
             }}
         """)
         tot_layout = QVBoxLayout(tot_card)
+        tot_layout.setContentsMargins(4, 4, 4, 4)
+        tot_layout.setSpacing(2)
         tot_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.lbl_tot_desc = QLabel("AMOUNT DUE")
-        self.lbl_tot_desc.setStyleSheet(f"color: {t['text_muted']}; font-size: 13px; font-weight: bold;")
+        self.lbl_tot_desc.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;")
         self.lbl_grand_val = QLabel(f"Rs. {self.grand_total:.2f}")
-        self.lbl_grand_val.setStyleSheet(f"color: {t['success']}; font-size: 36px; font-weight: bold; min-height: 44px;")
+        self.lbl_grand_val.setStyleSheet(f"color: {t['success']}; font-size: 32px; font-weight: bold;")
         tot_layout.addWidget(self.lbl_tot_desc, alignment=Qt.AlignmentFlag.AlignCenter)
         tot_layout.addWidget(self.lbl_grand_val, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(tot_card)
@@ -98,7 +104,7 @@ class CheckoutDialog(QDialog):
                 background-color: {t['bg_card_inner']};
                 border: 1px solid {t['border']};
                 border-radius: 8px;
-                padding: 6px 12px;
+                padding: 4px 10px;
             }}
             #checkoutDiscCard QLabel {{
                 background: transparent;
@@ -106,30 +112,30 @@ class CheckoutDialog(QDialog):
             }}
         """)
         disc_layout = QHBoxLayout(disc_card)
-        disc_layout.setContentsMargins(8, 4, 8, 4)
+        disc_layout.setContentsMargins(6, 4, 6, 4)
         disc_layout.setSpacing(8)
 
-        lbl_disc = QLabel("🏷️ Extra Discount / Round-off:")
-        lbl_disc.setStyleSheet(f"color: {t['text_primary']}; font-size: 13px; font-weight: bold;")
+        lbl_disc = QLabel("🏷️ Discount / Round-off:")
+        lbl_disc.setStyleSheet(f"color: {t['text_primary']}; font-size: 12px; font-weight: bold;")
         disc_layout.addWidget(lbl_disc)
 
         self.txt_discount = QLineEdit("0.00")
         self.txt_discount.setPlaceholderText("0.00")
         self.txt_discount.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.txt_discount.setFixedWidth(110)
-        self.txt_discount.setFixedHeight(34)
+        self.txt_discount.setFixedWidth(95)
+        self.txt_discount.setFixedHeight(30)
         self.txt_discount.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {t['bg_input']};
                 color: {t['accent']};
-                border: 2px solid {t['accent']};
+                border: 1.5px solid {t['accent']};
                 border-radius: 5px;
-                padding: 4px 8px;
-                font-size: 16px;
+                padding: 2px 6px;
+                font-size: 14px;
                 font-weight: bold;
             }}
             QLineEdit:focus {{
-                border: 2px solid {t['accent']};
+                border: 1.5px solid {t['accent']};
                 background-color: {t['bg_card']};
             }}
         """)
@@ -140,19 +146,19 @@ class CheckoutDialog(QDialog):
         # Quick round helper buttons
         self.btn_round_none = QPushButton("Rs. 0")
         self.btn_round_none.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_round_none.setFixedHeight(30)
+        self.btn_round_none.setFixedHeight(28)
         self.btn_round_none.setToolTip("Clear extra discount (0.00)")
         self.btn_round_none.clicked.connect(lambda: self.set_quick_discount(Decimal('0.00')))
 
         self.btn_round_50 = QPushButton("Round 50")
         self.btn_round_50.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_round_50.setFixedHeight(30)
+        self.btn_round_50.setFixedHeight(28)
         self.btn_round_50.setToolTip("Round down to nearest 50")
         self.btn_round_50.clicked.connect(lambda: self.round_down_to(Decimal('50.00')))
 
         self.btn_round_100 = QPushButton("Round 100")
         self.btn_round_100.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_round_100.setFixedHeight(30)
+        self.btn_round_100.setFixedHeight(28)
         self.btn_round_100.setToolTip("Round down to nearest 100 (e.g. 3250 -> 3200)")
         self.btn_round_100.clicked.connect(lambda: self.round_down_to(Decimal('100.00')))
 
@@ -163,7 +169,7 @@ class CheckoutDialog(QDialog):
                     color: {t['text_secondary']};
                     border: 1px solid {t['border']};
                     border-radius: 4px;
-                    padding: 4px 8px;
+                    padding: 3px 8px;
                     font-size: 11px;
                     font-weight: 600;
                 }}
@@ -181,26 +187,69 @@ class CheckoutDialog(QDialog):
         cust_row.setSpacing(10)
 
         cname_col = QVBoxLayout()
-        cname_col.setSpacing(3)
+        cname_col.setSpacing(2)
         lbl_cn = QLabel("Customer Name:")
         lbl_cn.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px; font-weight: bold;")
         self.txt_cust_name = QLineEdit(self.customer_name)
         self.txt_cust_name.setPlaceholderText("Walk-In")
+        self.txt_cust_name.setFixedHeight(32)
+        self.txt_cust_name.setStyleSheet(f"QLineEdit {{ background-color: {t['bg_input']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 5px; padding: 4px 8px; font-size: 12px; }}")
         cname_col.addWidget(lbl_cn)
         cname_col.addWidget(self.txt_cust_name)
 
         cphone_col = QVBoxLayout()
-        cphone_col.setSpacing(3)
+        cphone_col.setSpacing(2)
         lbl_cp = QLabel("Mobile Number (SMS):")
         lbl_cp.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px; font-weight: bold;")
         self.txt_cust_phone = QLineEdit(self.customer_phone)
         self.txt_cust_phone.setPlaceholderText("07XXXXXXXX")
+        self.txt_cust_phone.setFixedHeight(32)
+        self.txt_cust_phone.setStyleSheet(f"QLineEdit {{ background-color: {t['bg_input']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 5px; padding: 4px 8px; font-size: 12px; }}")
         cphone_col.addWidget(lbl_cp)
         cphone_col.addWidget(self.txt_cust_phone)
 
         cust_row.addLayout(cname_col, 3)
         cust_row.addLayout(cphone_col, 2)
         layout.addLayout(cust_row)
+
+        # Payment Mode Toggle Bar (Single vs Multi Payment)
+        mode_box = QFrame()
+        mode_box.setObjectName("checkoutModeBox")
+        mode_box.setStyleSheet(f"""
+            #checkoutModeBox {{
+                background-color: {t['bg_card_inner']};
+                border: 1px solid {t['border']};
+                border-radius: 8px;
+                padding: 2px;
+            }}
+            #checkoutModeBox QPushButton {{
+                border: none;
+                border-radius: 6px;
+            }}
+        """)
+        mode_layout = QHBoxLayout(mode_box)
+        mode_layout.setContentsMargins(3, 3, 3, 3)
+        mode_layout.setSpacing(6)
+
+        self.btn_mode_single = QPushButton("💵 Single Payment")
+        self.btn_mode_single.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_mode_single.setFixedHeight(34)
+        self.btn_mode_single.clicked.connect(lambda: self.set_payment_mode("single"))
+
+        self.btn_mode_multi = QPushButton("🔀 Multi Payment (Split)")
+        self.btn_mode_multi.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_mode_multi.setFixedHeight(34)
+        self.btn_mode_multi.clicked.connect(lambda: self.set_payment_mode("multiple"))
+
+        mode_layout.addWidget(self.btn_mode_single)
+        mode_layout.addWidget(self.btn_mode_multi)
+        layout.addWidget(mode_box)
+
+        # --- Container 1: Single Payment ---
+        self.container_single = QWidget()
+        single_vbox = QVBoxLayout(self.container_single)
+        single_vbox.setContentsMargins(0, 0, 0, 0)
+        single_vbox.setSpacing(10)
 
         # Payment Method Selector
         method_layout = QHBoxLayout()
@@ -213,7 +262,7 @@ class CheckoutDialog(QDialog):
 
         for b in self.method_buttons:
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(42)
+            b.setFixedHeight(40)
             if self.theme_mode == "light":
                 b.setStyleSheet("""
                     QPushButton {
@@ -264,22 +313,23 @@ class CheckoutDialog(QDialog):
         self.btn_card.clicked.connect(lambda: self.set_method("CARD"))
         self.btn_transfer.clicked.connect(lambda: self.set_method("TRANSFER"))
 
-        layout.addLayout(method_layout)
+        single_vbox.addLayout(method_layout)
 
         # Cash Tendered & Change Row
         form_layout = QGridLayout()
 
         lbl_paid = QLabel("Amount Tendered (Rs.):")
-        lbl_paid.setStyleSheet(f"color: {t['text_primary']}; font-size: 14px; font-weight: 600;")
+        lbl_paid.setStyleSheet(f"color: {t['text_primary']}; font-size: 13px; font-weight: 600;")
         self.txt_paid = QLineEdit(f"{self.grand_total:.2f}")
+        self.txt_paid.setFixedHeight(36)
         self.txt_paid.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {t['bg_input']};
                 color: {t['text_primary']};
                 border: 2px solid {t['accent']};
                 border-radius: 6px;
-                padding: 8px;
-                font-size: 18px;
+                padding: 4px 8px;
+                font-size: 16px;
                 font-weight: bold;
             }}
         """)
@@ -295,25 +345,262 @@ class CheckoutDialog(QDialog):
 
         # Change Due / Balance Due Display
         self.lbl_change_title = QLabel("Change Due (Rs.):")
-        self.lbl_change_title.setStyleSheet(f"color: {t['text_primary']}; font-size: 14px; font-weight: 600;")
+        self.lbl_change_title.setStyleSheet(f"color: {t['text_primary']}; font-size: 13px; font-weight: 600;")
         self.lbl_change_val = QLabel("Rs. 0.00")
-        self.lbl_change_val.setStyleSheet(f"color: {t['accent']}; font-size: 20px; font-weight: bold;")
+        self.lbl_change_val.setStyleSheet(f"color: {t['accent']}; font-size: 18px; font-weight: bold;")
         form_layout.addWidget(self.lbl_change_title, 2, 0)
         form_layout.addWidget(self.lbl_change_val, 2, 1)
 
-        layout.addLayout(form_layout)
+        single_vbox.addLayout(form_layout)
+        layout.addWidget(self.container_single)
+
+        # --- Container 2: Multi Payment (Split) ---
+        self.container_multi = QWidget()
+        multi_vbox = QVBoxLayout(self.container_multi)
+        multi_vbox.setContentsMargins(0, 0, 0, 0)
+        multi_vbox.setSpacing(8)
+
+        # Card 1: Primary Method (Cash)
+        cash_card = QFrame()
+        cash_card.setObjectName("multiCashCard")
+        cash_card.setStyleSheet(f"""
+            #multiCashCard {{
+                background-color: {t['bg_card_inner']};
+                border: 1px solid {t['border']};
+                border-radius: 8px;
+                padding: 8px 12px;
+            }}
+            #multiCashCard QLabel {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }}
+        """)
+        cc_layout = QVBoxLayout(cash_card)
+        cc_layout.setContentsMargins(4, 4, 4, 4)
+        cc_layout.setSpacing(6)
+
+        ch_hdr = QHBoxLayout()
+        lbl_p_title = QLabel("1. PRIMARY METHOD: CASH")
+        lbl_p_title.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;")
+        ch_hdr.addWidget(lbl_p_title)
+        ch_hdr.addStretch()
+
+        q_exact = QPushButton("Exact")
+        q_exact.setCursor(Qt.CursorShape.PointingHandCursor)
+        q_exact.setFixedHeight(24)
+        q_exact.setStyleSheet(f"background-color: {t['btn_default_bg']}; color: {t['success']}; border: 1px solid {t['border']}; border-radius: 4px; padding: 1px 8px; font-weight: bold; font-size: 11px;")
+        q_exact.clicked.connect(self._set_multi_cash_exact)
+
+        q_half = QPushButton("50%")
+        q_half.setCursor(Qt.CursorShape.PointingHandCursor)
+        q_half.setFixedHeight(24)
+        q_half.setStyleSheet(f"background-color: {t['btn_default_bg']}; color: {t['accent']}; border: 1px solid {t['border']}; border-radius: 4px; padding: 1px 8px; font-weight: bold; font-size: 11px;")
+        q_half.clicked.connect(self._set_multi_cash_half)
+
+        q_zero = QPushButton("Rs. 0")
+        q_zero.setCursor(Qt.CursorShape.PointingHandCursor)
+        q_zero.setFixedHeight(24)
+        q_zero.setStyleSheet(f"background-color: {t['btn_default_bg']}; color: #ef4444; border: 1px solid {t['border']}; border-radius: 4px; padding: 1px 8px; font-weight: bold; font-size: 11px;")
+        q_zero.clicked.connect(self._set_multi_cash_zero)
+
+        ch_hdr.addWidget(q_exact)
+        ch_hdr.addWidget(q_half)
+        ch_hdr.addWidget(q_zero)
+        cc_layout.addLayout(ch_hdr)
+
+        cin_row = QHBoxLayout()
+        lbl_mc = QLabel("Cash Received:")
+        lbl_mc.setStyleSheet(f"color: {t['text_primary']}; font-size: 13px; font-weight: 600;")
+        lbl_mc.setFixedWidth(110)
+        self.txt_multi_cash = QLineEdit(f"{self.grand_total:.2f}")
+        self.txt_multi_cash.setFixedHeight(36)
+        self.txt_multi_cash.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {t['bg_input']};
+                color: {t['text_primary']};
+                border: 2px solid {t['accent']};
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+        """)
+        self.txt_multi_cash.textChanged.connect(self.calculate_multi_change)
+        self.txt_multi_cash.installEventFilter(self)
+
+        cin_row.addWidget(lbl_mc)
+        cin_row.addWidget(self.txt_multi_cash, 1)
+        cc_layout.addLayout(cin_row)
+        multi_vbox.addWidget(cash_card)
+
+        # Card 2: Secondary Method (Card / Bank Transfer)
+        sec_card = QFrame()
+        sec_card.setObjectName("multiSecCard")
+        sec_card.setStyleSheet(f"""
+            #multiSecCard {{
+                background-color: {t['bg_card_inner']};
+                border: 1px solid {t['border']};
+                border-radius: 8px;
+                padding: 8px 12px;
+            }}
+            #multiSecCard QLabel {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }}
+        """)
+        sc_layout = QVBoxLayout(sec_card)
+        sc_layout.setContentsMargins(4, 4, 4, 4)
+        sc_layout.setSpacing(6)
+
+        sec_hdr = QHBoxLayout()
+        lbl_s_title = QLabel("2. SECONDARY METHOD:")
+        lbl_s_title.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;")
+        sec_hdr.addWidget(lbl_s_title)
+        sec_hdr.addStretch()
+
+        self.btn_sec_card = QPushButton("💳 Card Pay")
+        self.btn_sec_card.setCheckable(True)
+        self.btn_sec_card.setFixedHeight(26)
+        self.btn_sec_card.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sec_card.clicked.connect(lambda: self.set_multi_sec_method("online"))
+
+        self.btn_sec_transfer = QPushButton("🏦 Bank Transfer")
+        self.btn_sec_transfer.setCheckable(True)
+        self.btn_sec_transfer.setFixedHeight(26)
+        self.btn_sec_transfer.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sec_transfer.clicked.connect(lambda: self.set_multi_sec_method("bank_transfer"))
+
+        sec_hdr.addWidget(self.btn_sec_card)
+        sec_hdr.addWidget(self.btn_sec_transfer)
+        sc_layout.addLayout(sec_hdr)
+
+        sin_row = QHBoxLayout()
+        lbl_ms = QLabel("Sec. Amount:")
+        lbl_ms.setStyleSheet(f"color: {t['text_primary']}; font-size: 13px; font-weight: 600;")
+        lbl_ms.setFixedWidth(110)
+        self.txt_multi_sec = QLineEdit("0.00")
+        self.txt_multi_sec.setFixedHeight(36)
+        self.txt_multi_sec.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {t['bg_input']};
+                color: {t['text_primary']};
+                border: 2px solid {t['border']};
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {t['accent']};
+            }}
+        """)
+        self.txt_multi_sec.textChanged.connect(self.calculate_multi_change)
+        self.txt_multi_sec.installEventFilter(self)
+
+        self.btn_fill_bal = QPushButton("⚡ Fill Balance")
+        self.btn_fill_bal.setToolTip("Auto-fill remaining balance to reach Grand Total")
+        self.btn_fill_bal.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_fill_bal.setFixedHeight(36)
+        self.btn_fill_bal.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t['accent']};
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 12px;
+                border-radius: 6px;
+                padding: 0px 14px;
+                border: none;
+            }}
+            QPushButton:hover {{
+                opacity: 0.9;
+            }}
+        """)
+        self.btn_fill_bal.clicked.connect(self.fill_multi_balance)
+
+        sin_row.addWidget(lbl_ms)
+        sin_row.addWidget(self.txt_multi_sec, 1)
+        sin_row.addWidget(self.btn_fill_bal)
+        sc_layout.addLayout(sin_row)
+
+        ref_row = QHBoxLayout()
+        lbl_ref = QLabel("Ref / Slip #:")
+        lbl_ref.setStyleSheet(f"color: {t['text_secondary']}; font-size: 12px; font-weight: 600;")
+        lbl_ref.setFixedWidth(110)
+        self.txt_multi_ref = QLineEdit("")
+        self.txt_multi_ref.setPlaceholderText("Approval code / Bank slip reference (optional)")
+        self.txt_multi_ref.setFixedHeight(30)
+        self.txt_multi_ref.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {t['bg_input']};
+                color: {t['text_primary']};
+                border: 1px solid {t['border']};
+                border-radius: 5px;
+                padding: 3px 6px;
+                font-size: 12px;
+            }}
+        """)
+        self.txt_multi_ref.returnPressed.connect(self.confirm_payment)
+        ref_row.addWidget(lbl_ref)
+        ref_row.addWidget(self.txt_multi_ref, 1)
+        sc_layout.addLayout(ref_row)
+
+        multi_vbox.addWidget(sec_card)
+
+        # Card 3: Multi Payment Summary (2 Columns)
+        summ_card = QFrame()
+        summ_card.setObjectName("multiSummaryCard")
+        summ_card.setStyleSheet(f"""
+            #multiSummaryCard {{
+                background-color: {t['bg_card_inner']};
+                border: 1px solid {t['border']};
+                border-radius: 8px;
+                padding: 6px 12px;
+            }}
+            #multiSummaryCard QLabel {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }}
+        """)
+        sm_layout = QHBoxLayout(summ_card)
+        sm_layout.setContentsMargins(6, 4, 6, 4)
+
+        col1 = QVBoxLayout()
+        col1.setSpacing(2)
+        lbl_t1 = QLabel("TOTAL TENDERED")
+        lbl_t1.setStyleSheet(f"color: {t['text_muted']}; font-size: 10px; font-weight: bold; letter-spacing: 0.5px;")
+        self.lbl_multi_total_val = QLabel(f"Rs. {self.grand_total:.2f}")
+        self.lbl_multi_total_val.setStyleSheet(f"color: {t['text_primary']}; font-size: 16px; font-weight: bold;")
+        col1.addWidget(lbl_t1)
+        col1.addWidget(self.lbl_multi_total_val)
+        sm_layout.addLayout(col1, 1)
+
+        col2 = QVBoxLayout()
+        col2.setSpacing(2)
+        self.lbl_multi_status_title = QLabel("BALANCE TO RETURN")
+        self.lbl_multi_status_title.setStyleSheet(f"color: {t['text_muted']}; font-size: 10px; font-weight: bold; letter-spacing: 0.5px;")
+        self.lbl_multi_status_val = QLabel("Rs. 0.00")
+        self.lbl_multi_status_val.setStyleSheet(f"color: {t['accent']}; font-size: 18px; font-weight: bold;")
+        col2.addWidget(self.lbl_multi_status_title)
+        col2.addWidget(self.lbl_multi_status_val)
+        sm_layout.addLayout(col2, 1)
+
+        multi_vbox.addWidget(summ_card)
+        layout.addWidget(self.container_multi)
 
         # Print Receipt Checkbox
         self.chk_print = QCheckBox("Direct Thermal Print Receipt (ESC/POS 80mm)")
         self.chk_print.setChecked(True)
-        self.chk_print.setStyleSheet(f"color: {t['text_secondary']}; font-size: 13px;")
+        self.chk_print.setStyleSheet(f"color: {t['text_secondary']}; font-size: 12px;")
         layout.addWidget(self.chk_print)
 
         # SMS Notification Checkbox
         self.chk_sms = QCheckBox("📱 Auto-Send SMS Bill to Customer Phone")
         is_phone_ok = is_valid_phone(self.customer_phone)
         self.chk_sms.setChecked(self.auto_sms_enabled and is_phone_ok)
-        self.chk_sms.setStyleSheet(f"color: {t['text_primary']}; font-size: 13px; font-weight: 600;")
+        self.chk_sms.setStyleSheet(f"color: {t['text_primary']}; font-size: 12px; font-weight: 600;")
         layout.addWidget(self.chk_sms)
 
         def _on_phone_changed(text):
@@ -321,16 +608,15 @@ class CheckoutDialog(QDialog):
                 self.chk_sms.setChecked(is_valid_phone(text))
         self.txt_cust_phone.textChanged.connect(_on_phone_changed)
 
-        layout.addStretch()
-
         # Action Buttons
         btn_box = QHBoxLayout()
         self.btn_cancel = QPushButton("Cancel (Esc)")
+        self.btn_cancel.setFixedHeight(40)
         self.btn_cancel.setStyleSheet(f"""
             QPushButton {{
                 background-color: {t['btn_default_bg']};
-                color: {t['btn_default_fg']};
-                padding: 10px 20px;
+                color: {t['text_primary']};
+                padding: 8px 18px;
                 border-radius: 6px;
                 font-weight: 600;
                 border: 1px solid {t['border']};
@@ -342,13 +628,14 @@ class CheckoutDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
         btn_box.addWidget(self.btn_cancel)
 
-        self.btn_confirm = QPushButton("✓ PAY & PRINT [Enter]")
+        self.btn_confirm = QPushButton("✓ PAY && PRINT [Enter]")
         self.btn_confirm.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_confirm.setFixedHeight(40)
         self.btn_confirm.setStyleSheet(f"""
             QPushButton {{
                 background-color: {t['success']};
                 color: #ffffff;
-                padding: 12px 28px;
+                padding: 8px 24px;
                 border-radius: 6px;
                 font-size: 15px;
                 font-weight: bold;
@@ -363,7 +650,9 @@ class CheckoutDialog(QDialog):
 
         layout.addLayout(btn_box)
 
-        # Initialize method state
+        # Initialize mode & method state
+        self.set_multi_sec_method(self.split_secondary_method)
+        self.set_payment_mode("single")
         self.set_method(self.payment_method)
 
     def showEvent(self, event):
@@ -398,8 +687,15 @@ class CheckoutDialog(QDialog):
 
         # Update default amount tendered to match new grand total
         self.txt_paid.setText(f"{self.grand_total:.2f}")
+        if hasattr(self, 'txt_multi_cash'):
+            self.txt_multi_cash.setText(f"{self.grand_total:.2f}")
+        if hasattr(self, 'txt_multi_sec'):
+            self.txt_multi_sec.setText("0.00")
         self._refresh_quick_buttons()
-        self.calculate_change()
+        if self.payment_mode == "single":
+            self.calculate_change()
+        else:
+            self.calculate_multi_change()
 
     def set_quick_discount(self, disc_amt: Decimal):
         disc_amt = max(Decimal('0.00'), min(disc_amt, self.original_grand_total))
@@ -414,20 +710,166 @@ class CheckoutDialog(QDialog):
         diff = self.original_grand_total - rounded_total
         self.set_quick_discount(diff)
 
+    def set_payment_mode(self, mode: str):
+        self.payment_mode = mode
+        is_single = (mode == "single")
+        self.btn_mode_single.setChecked(is_single)
+        self.btn_mode_multi.setChecked(not is_single)
+
+        t = self.theme
+        checked_style = f"""
+            QPushButton {{
+                background-color: {t['accent']};
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 13px;
+                border: none;
+                border-radius: 6px;
+            }}
+        """
+        unchecked_style = f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {t['text_secondary']};
+                font-weight: 600;
+                font-size: 13px;
+                border: none;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: {t['btn_default_bg']};
+                color: {t['text_primary']};
+            }}
+        """
+        self.btn_mode_single.setStyleSheet(checked_style if is_single else unchecked_style)
+        self.btn_mode_multi.setStyleSheet(unchecked_style if is_single else checked_style)
+
+        self.container_single.setVisible(is_single)
+        self.container_multi.setVisible(not is_single)
+
+        if is_single:
+            self.calculate_change()
+        else:
+            self.calculate_multi_change()
+
+    def set_multi_sec_method(self, method: str):
+        self.split_secondary_method = method
+        is_card = (method == "online")
+        self.btn_sec_card.setChecked(is_card)
+        self.btn_sec_transfer.setChecked(not is_card)
+        t = self.theme
+        active_style = f"""
+            QPushButton {{
+                background-color: {t['accent']};
+                color: #ffffff;
+                border: 1px solid {t['accent']};
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 2px 10px;
+            }}
+        """
+        inactive_style = f"""
+            QPushButton {{
+                background-color: {t['btn_default_bg']};
+                color: {t['text_secondary']};
+                border: 1px solid {t['border']};
+                border-radius: 5px;
+                font-weight: 600;
+                font-size: 11px;
+                padding: 2px 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {t['border']};
+                color: {t['text_primary']};
+            }}
+        """
+        self.btn_sec_card.setStyleSheet(active_style if is_card else inactive_style)
+        self.btn_sec_transfer.setStyleSheet(inactive_style if is_card else active_style)
+        if is_card:
+            self.txt_multi_ref.setPlaceholderText("Card Approval Code / Transaction Ref (optional)")
+        else:
+            self.txt_multi_ref.setPlaceholderText("Bank Name / Slip No. / Transfer Ref (optional)")
+
+    def fill_multi_balance(self):
+        try:
+            cash_str = self.txt_multi_cash.text().strip() or "0"
+            cash_val = Decimal(cash_str)
+        except Exception:
+            cash_val = Decimal('0.00')
+        bal = max(Decimal('0.00'), self.grand_total - cash_val)
+        self.txt_multi_sec.setText(f"{bal:.2f}")
+        self.txt_multi_sec.selectAll()
+        self.txt_multi_sec.setFocus()
+        self.calculate_multi_change()
+
+    def _set_multi_cash_exact(self):
+        self.txt_multi_cash.setText(f"{self.grand_total:.2f}")
+        self.txt_multi_sec.setText("0.00")
+        self.calculate_multi_change()
+
+    def _set_multi_cash_half(self):
+        half_val = round(float(self.grand_total) / 2.0, 2)
+        self.txt_multi_cash.setText(f"{half_val:.2f}")
+        rem = round(float(self.grand_total) - half_val, 2)
+        self.txt_multi_sec.setText(f"{rem:.2f}")
+        self.calculate_multi_change()
+
+    def _set_multi_cash_zero(self):
+        self.txt_multi_cash.setText("0.00")
+        self.txt_multi_sec.setText(f"{self.grand_total:.2f}")
+        self.calculate_multi_change()
+
+    def calculate_multi_change(self):
+        if not hasattr(self, 'txt_multi_cash') or not hasattr(self, 'txt_multi_sec'):
+            return
+        t = self.theme
+        try:
+            c_str = self.txt_multi_cash.text().strip() or "0"
+            cash_val = Decimal(c_str)
+        except Exception:
+            cash_val = Decimal('0.00')
+
+        try:
+            s_str = self.txt_multi_sec.text().strip() or "0"
+            sec_val = Decimal(s_str)
+        except Exception:
+            sec_val = Decimal('0.00')
+
+        total_rec = cash_val + sec_val
+
+        if total_rec < self.grand_total:
+            self.paid_amount = max(Decimal('0.00'), total_rec)
+            self.due_amount = self.grand_total - self.paid_amount
+            self.change_amount = Decimal('0.00')
+            self.lbl_multi_status_title.setText("BALANCE DUE")
+            self.lbl_multi_status_title.setStyleSheet("color: #ef4444; font-size: 10px; font-weight: bold; letter-spacing: 0.5px;")
+            self.lbl_multi_status_val.setText(f"Rs. {self.due_amount:.2f}")
+            self.lbl_multi_status_val.setStyleSheet("color: #ef4444; font-size: 18px; font-weight: bold;")
+        else:
+            self.paid_amount = self.grand_total
+            self.due_amount = Decimal('0.00')
+            self.change_amount = total_rec - self.grand_total
+            self.lbl_multi_status_title.setText("BALANCE TO RETURN")
+            self.lbl_multi_status_title.setStyleSheet(f"color: {t['text_muted']}; font-size: 10px; font-weight: bold; letter-spacing: 0.5px;")
+            self.lbl_multi_status_val.setText(f"Rs. {self.change_amount:.2f}")
+            self.lbl_multi_status_val.setStyleSheet(f"color: {t['accent']}; font-size: 18px; font-weight: bold;")
+
+        self.lbl_multi_total_val.setText(f"Rs. {total_rec:.2f}")
+
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
 
             # When user is on Global Discount field
             if hasattr(self, 'txt_discount') and watched == self.txt_discount:
-                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
-                    # Enter or Down Arrow confirms discount and jumps to Payment Methods
-                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
-                    self.method_buttons[cur_idx].setFocus()
-                    return True
-                elif key == Qt.Key.Key_Tab:
-                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
-                    self.method_buttons[cur_idx].setFocus()
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down, Qt.Key.Key_Tab):
+                    if self.payment_mode == "single":
+                        cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                        self.method_buttons[cur_idx].setFocus()
+                    else:
+                        self.txt_multi_cash.setFocus()
+                        self.txt_multi_cash.selectAll()
                     return True
 
             # When user is on payment method buttons
@@ -466,6 +908,28 @@ class CheckoutDialog(QDialog):
                 elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                     # Enter triggers Pay & Print
                     self.confirm_payment()
+                    return True
+
+            # When user is on Multi Cash input
+            elif hasattr(self, 'txt_multi_cash') and watched == self.txt_multi_cash:
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
+                    self.txt_multi_sec.setFocus()
+                    self.txt_multi_sec.selectAll()
+                    return True
+                elif key == Qt.Key.Key_Up:
+                    if hasattr(self, 'txt_discount'):
+                        self.txt_discount.setFocus()
+                        self.txt_discount.selectAll()
+                    return True
+
+            # When user is on Multi Sec input
+            elif hasattr(self, 'txt_multi_sec') and watched == self.txt_multi_sec:
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    self.confirm_payment()
+                    return True
+                elif key == Qt.Key.Key_Up:
+                    self.txt_multi_cash.setFocus()
+                    self.txt_multi_cash.selectAll()
                     return True
 
         return super().eventFilter(watched, event)
@@ -601,7 +1065,28 @@ class CheckoutDialog(QDialog):
             self.lbl_change_val.setStyleSheet(f"color: {t['accent']}; font-size: 20px; font-weight: bold;")
 
     def confirm_payment(self):
-        self.calculate_change()
+        if self.payment_mode == "multiple":
+            self.calculate_multi_change()
+            try:
+                cash_val = Decimal(self.txt_multi_cash.text().strip() or "0")
+            except Exception:
+                cash_val = Decimal('0.00')
+            try:
+                sec_val = Decimal(self.txt_multi_sec.text().strip() or "0")
+            except Exception:
+                sec_val = Decimal('0.00')
+
+            self.payment_method = "MULTIPLE"
+            self.split_payments = {
+                "cash": float(cash_val),
+                "secondary_method": self.split_secondary_method,
+                "secondary_amount": float(sec_val),
+                "secondary_ref": self.txt_multi_ref.text().strip()
+            }
+        else:
+            self.calculate_change()
+            self.split_payments = None
+
         cust_name = self.txt_cust_name.text().strip()
         if self.due_amount > 0:
             if not cust_name or cust_name.lower() in ("walk-in", "walk in", "walking"):
@@ -627,38 +1112,51 @@ class CheckoutDialog(QDialog):
 
         if hasattr(self, 'txt_discount') and self.txt_discount.hasFocus():
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
-                cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
-                self.method_buttons[cur_idx].setFocus()
+                if self.payment_mode == "single":
+                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                    self.method_buttons[cur_idx].setFocus()
+                else:
+                    self.txt_multi_cash.setFocus()
+                    self.txt_multi_cash.selectAll()
                 return
-        elif not self.txt_paid.hasFocus():
+        elif not self.txt_paid.hasFocus() and (not hasattr(self, 'txt_multi_cash') or not self.txt_multi_cash.hasFocus()) and (not hasattr(self, 'txt_multi_sec') or not self.txt_multi_sec.hasFocus()):
             if key == Qt.Key.Key_Up:
                 if hasattr(self, 'txt_discount'):
                     self.txt_discount.setFocus()
                     self.txt_discount.selectAll()
                 return
-            elif key in (Qt.Key.Key_Right, Qt.Key.Key_Tab):
+            elif key in (Qt.Key.Key_Right, Qt.Key.Key_Tab) and self.payment_mode == "single":
                 cur_idx = self.methods.index(self.payment_method)
                 next_idx = (cur_idx + 1) % len(self.methods)
                 self.set_method(self.methods[next_idx])
                 self.method_buttons[next_idx].setFocus()
                 return
-            elif key in (Qt.Key.Key_Left, Qt.Key.Key_Backtab):
+            elif key in (Qt.Key.Key_Left, Qt.Key.Key_Backtab) and self.payment_mode == "single":
                 cur_idx = self.methods.index(self.payment_method)
                 prev_idx = (cur_idx - 1) % len(self.methods)
                 self.set_method(self.methods[prev_idx])
                 self.method_buttons[prev_idx].setFocus()
                 return
             elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
-                self.txt_paid.setFocus()
-                self.txt_paid.selectAll()
+                if self.payment_mode == "single":
+                    self.txt_paid.setFocus()
+                    self.txt_paid.selectAll()
+                else:
+                    self.txt_multi_cash.setFocus()
+                    self.txt_multi_cash.selectAll()
                 return
         else:
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.confirm_payment()
                 return
             elif key == Qt.Key.Key_Up:
-                cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
-                self.method_buttons[cur_idx].setFocus()
+                if self.payment_mode == "single":
+                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                    self.method_buttons[cur_idx].setFocus()
+                else:
+                    if hasattr(self, 'txt_discount'):
+                        self.txt_discount.setFocus()
+                        self.txt_discount.selectAll()
                 return
         super().keyPressEvent(event)
 
@@ -2298,6 +2796,7 @@ class MainWindow(QMainWindow):
                 "paid_amount": float(checkout_dlg.paid_amount),
                 "due_amount": float(checkout_dlg.due_amount),
                 "payment_method": checkout_dlg.payment_method,
+                "split_payments": checkout_dlg.split_payments,
                 "items": items,
                 "items_json": items,
                 "created_at": now_str,

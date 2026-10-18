@@ -91,9 +91,33 @@ def format_thermal_receipt(inv: Dict[str, Any], tenant_subdomain: str = "dbl", c
     if tax > 0:
         lines.append(f"{'Tax:':<24}Rs. {tax:>10.2f}")
 
+    pay_lines = []
+    if payment == "MULTIPLE" and inv.get("split_payments"):
+        sp = inv.get("split_payments")
+        if isinstance(sp, str):
+            try:
+                sp = json.loads(sp)
+            except Exception:
+                sp = {}
+        if isinstance(sp, dict):
+            cash_p = float(sp.get("cash", 0.0) or 0.0)
+            raw_sec = str(sp.get("secondary_method", "card")).lower()
+            sec_m = "CARD" if raw_sec in ("online", "card") else "BANK TRANSFER"
+            sec_p = float(sp.get("secondary_amount", 0.0) or 0.0)
+            sec_ref = str(sp.get("secondary_ref", "") or "").strip()
+            pay_lines.append(f"{'Payment Method:':<24}{'MULTIPLE':>14}")
+            pay_lines.append(f"{'  • Cash:':<24}Rs. {cash_p:>10.2f}")
+            ref_str = f" [{sec_ref}]" if sec_ref else ""
+            pay_lines.append(f"{'  • ' + sec_m + ref_str + ':':<24}Rs. {sec_p:>10.2f}")
+    elif float(inv.get('due_amount', 0.0) or 0.0) > 0:
+        paid_val = float(inv.get('paid_amount', grand_total - float(inv.get('due_amount', 0.0) or 0.0)))
+        pay_lines.append(f"{'Amount Paid:':<24}Rs. {paid_val:>10.2f}")
+    else:
+        pay_lines.append(f"{'Payment (' + payment + '):':<24}Rs. {grand_total:>10.2f}")
+
     lines.extend([
         f"{'GRAND TOTAL:':<24}Rs. {grand_total:>10.2f}",
-        f"{'Amount Paid:':<24}Rs. {float(inv.get('paid_amount', grand_total - float(inv.get('due_amount', 0.0) or 0.0))):>10.2f}" if float(inv.get('due_amount', 0.0) or 0.0) > 0 else f"{'Payment (' + payment + '):':<24}Rs. {grand_total:>10.2f}",
+        *pay_lines,
         f"{'BALANCE DUE:':<24}Rs. {float(inv.get('due_amount', 0.0) or 0.0):>10.2f}" if float(inv.get('due_amount', 0.0) or 0.0) > 0 else "",
         f"{'Payment Status:':<24}{'CREDIT (DUE)':>14}" if float(inv.get('due_amount', 0.0) or 0.0) > 0 else "",
         "=" * 38,
@@ -539,7 +563,7 @@ class SalesListDialog(QDialog):
         self.table.setColumnWidth(5, 120) # Subtotal
         self.table.setColumnWidth(6, 115) # Discount
         self.table.setColumnWidth(7, 125) # Grand Total
-        self.table.setColumnWidth(8, 105) # Payment
+        self.table.setColumnWidth(8, 140) # Payment
         self.table.setColumnWidth(9, 75)  # SMS
         self.table.setColumnWidth(10, 95) # Sync
 
@@ -942,14 +966,38 @@ class SalesListDialog(QDialog):
             self.table.setItem(row, 7, item_gt)
 
             # 8: Payment
-            pm = inv.get("payment_method", "CASH")
+            pm = str(inv.get("payment_method") or "CASH").strip().upper().replace("_", " ")
+            if pm in ["ONLINE", "CARD"]:
+                pm = "CARD PAYMENT"
+            elif pm in ["BANK TRANSFER", "TRANSFER"]:
+                pm = "BANK TRANSFER"
+            elif pm in ["FULL", "PAID"]:
+                pm = "CASH"
+
             due = float(inv.get("due_amount", 0.0) or 0.0)
-            if due > 0:
-                pm_text = f"{pm} (Due: Rs. {due:.2f})"
+            if due > 0 or pm == "CREDIT":
+                pm_text = f"CREDIT (Rs. {due:.2f})" if due > 0 else "CREDIT"
                 item_pm = QTableWidgetItem(pm_text)
+                item_pm.setForeground(QColor("#ef4444"))
+            elif pm == "MULTIPLE":
+                item_pm = QTableWidgetItem("MULTIPLE")
+                item_pm.setForeground(QColor("#a855f7"))
+            elif pm == "BANK TRANSFER":
+                item_pm = QTableWidgetItem("BANK TRANSFER")
+                item_pm.setForeground(QColor("#3b82f6"))
+            elif pm == "CARD PAYMENT":
+                item_pm = QTableWidgetItem("CARD PAYMENT")
+                item_pm.setForeground(QColor("#06b6d4"))
+            elif pm == "CHEQUE":
+                item_pm = QTableWidgetItem("CHEQUE")
                 item_pm.setForeground(QColor("#f59e0b"))
             else:
-                item_pm = QTableWidgetItem(pm)
+                item_pm = QTableWidgetItem("CASH")
+                item_pm.setForeground(QColor("#10b981"))
+
+            pm_font = item_pm.font()
+            pm_font.setBold(True)
+            item_pm.setFont(pm_font)
             item_pm.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 8, item_pm)
 

@@ -353,6 +353,32 @@ class SeniorQATestRunner:
         self.log_test("Suite 5", "TC-5.3", "Invoice properly queued in offline storage (is_synced = 0)", 
                       pending_count >= 1)
 
+        # Test Split / Multiple payment persistence & receipt context
+        split_inv_id = self.db.create_invoice({
+            "bill_no": "#QA-SPLIT-001",
+            "customer_name": "QA Split Customer",
+            "customer_phone": "0771234567",
+            "subtotal": 5000.0,
+            "discount": 0.0,
+            "tax": 0.0,
+            "grand_total": 5000.0,
+            "paid_amount": 5000.0,
+            "due_amount": 0.0,
+            "payment_method": "MULTIPLE",
+            "split_payments": {
+                "cash": 2000.0,
+                "secondary_method": "card",
+                "secondary_amount": 3000.0,
+                "secondary_ref": "REF999"
+            },
+            "items_json": items,
+            "created_at": "2026-10-18 13:00:00"
+        }, is_synced=0)
+
+        saved_split = self.db.get_invoice_by_bill_no("#QA-SPLIT-001")
+        split_ok = bool(saved_split and saved_split.get("split_payments"))
+        self.log_test("Suite 5", "TC-5.4", "Split payments persisted with multiple tender details", split_ok)
+
     # --------------------------------------------------------------------------
     # SUITE 6: Offline Invoicing Queue & Settings Persistence
     # --------------------------------------------------------------------------

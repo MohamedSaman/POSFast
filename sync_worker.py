@@ -140,6 +140,15 @@ class SyncWorker(QThread):
             gt = float(inv["grand_total"])
             due = float(inv.get("due_amount", 0.0) or 0.0)
             paid = float(inv.get("paid_amount", gt - due) if inv.get("paid_amount") is not None else gt - due)
+            
+            # Extract split_payments if present
+            split_data = inv.get("split_payments")
+            if isinstance(split_data, str) and split_data.strip():
+                try:
+                    split_data = json.loads(split_data)
+                except Exception:
+                    pass
+
             payload["invoices"].append({
                 "uuid": inv.get("bill_no"), # Can act as idempotency key
                 "local_invoice_no": inv["bill_no"],
@@ -153,6 +162,7 @@ class SyncWorker(QThread):
                 "paid_amount": paid,
                 "due_amount": due,
                 "payment_method": inv["payment_method"],
+                "split_payments": split_data,
                 "items": inv.get("items", []),
                 "billed_at": inv["created_at"]
             })
@@ -335,6 +345,20 @@ class SyncWorker(QThread):
                 if "invoices" in data:
                     invoices_list = data.get("invoices", [])
                     for inv in invoices_list:
+                        raw_pm = str(inv.get("payment_method") or "CASH").strip().upper().replace("_", " ")
+                        if raw_pm in ["ONLINE", "CARD", "CARD PAYMENT"]:
+                            inv["payment_method"] = "CARD PAYMENT"
+                        elif raw_pm in ["BANK TRANSFER", "TRANSFER"]:
+                            inv["payment_method"] = "BANK TRANSFER"
+                        elif raw_pm == "MULTIPLE":
+                            inv["payment_method"] = "MULTIPLE"
+                        elif raw_pm in ["FULL", "PAID", "CASH"]:
+                            inv["payment_method"] = "CASH"
+                        elif raw_pm in ["CHEQUE"]:
+                            inv["payment_method"] = "CHEQUE"
+                        else:
+                            inv["payment_method"] = raw_pm
+
                         self.db.upsert_synced_invoice(inv)
                         total_upserted += 1
                         total_amount += float(inv.get("grand_total", 0.0))
@@ -383,12 +407,23 @@ class SyncWorker(QThread):
                             except Exception:
                                 pass
 
-                        pay_method = (s.get("payment_method") or "CASH").upper()
+                        raw_pm = str(s.get("payment_method") or "CASH").strip().upper().replace("_", " ")
+                        if raw_pm in ["ONLINE", "CARD", "CARD PAYMENT"]:
+                            pay_method = "CARD PAYMENT"
+                        elif raw_pm in ["BANK TRANSFER", "TRANSFER"]:
+                            pay_method = "BANK TRANSFER"
+                        elif raw_pm == "MULTIPLE":
+                            pay_method = "MULTIPLE"
+                        elif raw_pm in ["FULL", "PAID", "CASH"]:
+                            pay_method = "CASH"
+                        elif raw_pm in ["CHEQUE"]:
+                            pay_method = "CHEQUE"
+                        else:
+                            pay_method = raw_pm
+
                         due_val = float(s.get("due_amount", 0.0) or 0.0)
                         if due_val > 0 or s.get("payment_status") in ["partial", "pending"] or pay_method == "CREDIT":
                             pay_method = "CREDIT"
-                        elif pay_method in ["FULL", "PAID"]:
-                            pay_method = "CASH"
 
                         gt = float(s.get("total_amount", 0.0))
                         paid_val = float(s.get("paid_amount", gt - due_val))

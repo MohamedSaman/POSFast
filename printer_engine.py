@@ -100,6 +100,12 @@ DEFAULT_THERMAL_TEMPLATE = """\
 <table width="100%" cellspacing="0" cellpadding="0"><tr><td style="font-size:3pt;">&nbsp;</td></tr><tr><td style="border-top:1px dashed #000; font-size:3pt;">&nbsp;</td></tr></table>
 <table width="100%" cellspacing="0" cellpadding="2" style="font-size:9pt;">
   <tr><td width="45%"><b>Payment Method</b></td><td>: <b>{{ payment_method }}{% if due_amount_raw > 0 %} (DUE SALE){% endif %}</b></td></tr>
+  {% if split_info %}
+  <tr><td colspan="2" style="font-size:8pt; padding-left:8px;">
+    <b>- Cash Paid:</b> Rs. {{ split_info.cash }}<br>
+    <b>- {{ split_info.sec_method }}:</b> Rs. {{ split_info.sec_amount }}{% if split_info.sec_ref %} (Ref: {{ split_info.sec_ref }}){% endif %}
+  </td></tr>
+  {% endif %}
   {% if customer_name and customer_name != 'Walk-In' %}
   <tr><td width="45%"><b>Customer</b></td><td>: <b>{{ customer_name }}</b></td></tr>
   {% endif %}
@@ -258,6 +264,23 @@ class POSPrinterEngine:
         barcode_text = bill_digits or bill_no
 
         footer = [l.strip() for l in (cfg.get("footer_lines") or "").splitlines() if l.strip()]
+        split_info = None
+        sp_data = inv.get("split_payments")
+        if isinstance(sp_data, str) and sp_data.strip():
+            try:
+                sp_data = json.loads(sp_data)
+            except Exception:
+                sp_data = None
+        if isinstance(sp_data, dict):
+            raw_sec = str(sp_data.get("secondary_method", "card")).lower()
+            sec_m = "Card" if raw_sec in ("online", "card") else "Bank Transfer"
+            split_info = {
+                "cash": fmt_money(sp_data.get("cash", 0.0)),
+                "sec_method": sec_m,
+                "sec_amount": fmt_money(sp_data.get("secondary_amount", 0.0)),
+                "sec_ref": sp_data.get("secondary_ref", ""),
+            }
+
         return {
             "shop_name": cfg["shop_name"], "shop_address": cfg["shop_address"],
             "shop_phone": cfg["shop_phone"], "shop_hotline": cfg["shop_hotline"],
@@ -266,6 +289,7 @@ class POSPrinterEngine:
             "cashier": self.db.get_setting("cashier_name", "Admin"),
             "customer_name": inv.get("customer_name") or "Walk-In",
             "payment_method": inv.get("payment_method", "CASH"),
+            "split_info": split_info,
             "items": rows, "total_items": fmt_qty(total_qty),
             "subtotal": fmt_money(subtotal),
             "discount": fmt_money(discount), "discount_raw": discount,
