@@ -75,7 +75,7 @@ class SettingsDialog(QDialog):
         self.auto_sms_enabled = "1"
         self.auto_sync_enabled = "1"
         self.setWindowTitle("System & Multi-Tenant Settings (F12)")
-        self.setFixedSize(660, 870)
+        self.setFixedSize(640, 800)
         self.setModal(True)
         self.init_ui()
         self.load_settings()
@@ -87,12 +87,12 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(24, 20, 24, 20)
 
         # Header Title
-        self.title_label = QLabel("⚙️ Multi-Tenant Cloud API & System Configuration")
+        self.title_label = QLabel("⚙️ Cloud API & System Configuration")
         self.title_label.setObjectName("dialogTitle")
         self.title_label.setStyleSheet("font-size: 17px; font-weight: bold; color: #00e5ff;")
         layout.addWidget(self.title_label)
 
-        self.desc_label = QLabel("Configure your Laravel backend connection, cashier ID, SMS gateway, and sync preferences.")
+        self.desc_label = QLabel("Configure your system connection URL, FastPOS API Token, cashier ID, and sync preferences.")
         self.desc_label.setStyleSheet("color: #a0aec0; font-size: 12px;")
         layout.addWidget(self.desc_label)
 
@@ -126,27 +126,7 @@ class SettingsDialog(QDialog):
         form_layout.addWidget(self.lbl_theme, 0, 0)
         form_layout.addLayout(theme_box, 0, 1)
 
-        # 1. System Preset Selector
-        self.lbl_preset = QLabel("System Preset:")
-        self.lbl_preset.setStyleSheet("font-weight: 600;")
-        self.cmb_preset = QComboBox()
-        self.cmb_preset.setFixedHeight(32)
-        self.cmb_preset.addItems([
-            "-- Select System Preset --",
-            "🏢 Jaffna Gold (Local: http://127.0.0.1:8000)",
-            "🏢 Plus Store (Local: http://127.0.0.1:8001)",
-            "🏢 Thihariya Tiles (Local: http://127.0.0.1:8002)",
-            "🏢 DLB Lottery (Local: http://127.0.0.1:8003)",
-            "🏢 RNZ System (Local: http://127.0.0.1:8004)",
-            "🏢 Vavuniya Jaffna Gold (Local: http://127.0.0.1:8005)",
-            "☁️ Jaffna Gold Cloud (https://jaffnagold.com)",
-            "⚙️ Custom / Manual Server URL",
-        ])
-        self.cmb_preset.currentIndexChanged.connect(self.on_preset_changed)
-        form_layout.addWidget(self.lbl_preset, 1, 0)
-        form_layout.addWidget(self.cmb_preset, 1, 1)
-
-        # 2. Tenant Subdomain / Server URL
+        # 1. Tenant Subdomain / Server URL
         self.lbl_tenant = QLabel("Server URL:")
         self.lbl_tenant.setStyleSheet("font-weight: 600;")
         
@@ -154,7 +134,7 @@ class SettingsDialog(QDialog):
         url_box.setSpacing(4)
 
         self.txt_tenant = QLineEdit()
-        self.txt_tenant.setPlaceholderText("e.g. http://127.0.0.1:8000  or  https://jaffnagold.webxkey.lk")
+        self.txt_tenant.setPlaceholderText("e.g. https://your-domain.com  or  http://127.0.0.1:8000")
         self.txt_tenant.textChanged.connect(self.update_url_preview)
         url_box.addWidget(self.txt_tenant)
 
@@ -169,8 +149,8 @@ class SettingsDialog(QDialog):
         local_row.addStretch()
         url_box.addLayout(local_row)
 
-        form_layout.addWidget(self.lbl_tenant, 2, 0)
-        form_layout.addLayout(url_box, 2, 1)
+        form_layout.addWidget(self.lbl_tenant, 1, 0)
+        form_layout.addLayout(url_box, 1, 1)
 
         # Base Domain (hidden internal fallback)
         self.txt_base = QLineEdit("webxkey.lk")
@@ -182,16 +162,16 @@ class SettingsDialog(QDialog):
         self.lbl_preview.setStyleSheet("color: #a0aec0; font-size: 11px;")
         self.lbl_url_preview = QLabel()
         self.lbl_url_preview.setStyleSheet("color: #00e5ff; font-family: monospace; font-size: 11px;")
-        form_layout.addWidget(self.lbl_preview, 3, 0)
-        form_layout.addWidget(self.lbl_url_preview, 3, 1)
+        form_layout.addWidget(self.lbl_preview, 2, 0)
+        form_layout.addWidget(self.lbl_url_preview, 2, 1)
 
-        # 3. API Bearer Token
-        self.lbl_token = QLabel("API Token / Key:")
+        # 2. FastPOS API Token / Key
+        self.lbl_token = QLabel("FastPOS Access Token:")
         self.lbl_token.setStyleSheet("font-weight: 600;")
         token_box = QHBoxLayout()
         self.txt_token = QLineEdit()
         self.txt_token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.txt_token.setPlaceholderText("Laravel Sanctum API Bearer Token (optional for local)")
+        self.txt_token.setPlaceholderText("Enter FASTPOS_TOKEN configured in your system .env")
         self.btn_toggle_token = QPushButton("👁")
         self.btn_toggle_token.setFixedWidth(40)
         self.btn_toggle_token.setFixedHeight(34)
@@ -199,34 +179,34 @@ class SettingsDialog(QDialog):
         self.btn_toggle_token.clicked.connect(self.toggle_token_visibility)
         token_box.addWidget(self.txt_token)
         token_box.addWidget(self.btn_toggle_token)
-        form_layout.addWidget(self.lbl_token, 4, 0)
-        form_layout.addLayout(token_box, 4, 1)
+        form_layout.addWidget(self.lbl_token, 3, 0)
+        form_layout.addLayout(token_box, 3, 1)
 
-        # 4. Terminal ID
+        # 3. Terminal ID
         self.lbl_terminal = QLabel("Terminal / Counter ID:")
         self.lbl_terminal.setStyleSheet("font-weight: 600;")
         self.txt_terminal = QLineEdit()
         self.txt_terminal.setPlaceholderText("e.g. POS-01, COUNTER-A")
-        form_layout.addWidget(self.lbl_terminal, 5, 0)
-        form_layout.addWidget(self.txt_terminal, 5, 1)
+        form_layout.addWidget(self.lbl_terminal, 4, 0)
+        form_layout.addWidget(self.txt_terminal, 4, 1)
 
-        # 5. Cashier Name
+        # 4. Cashier Name
         self.lbl_cashier = QLabel("Default Cashier:")
         self.lbl_cashier.setStyleSheet("font-weight: 600;")
         self.txt_cashier = QLineEdit()
         self.txt_cashier.setPlaceholderText("e.g. Admin, John, Saman")
-        form_layout.addWidget(self.lbl_cashier, 6, 0)
-        form_layout.addWidget(self.txt_cashier, 6, 1)
+        form_layout.addWidget(self.lbl_cashier, 5, 0)
+        form_layout.addWidget(self.txt_cashier, 5, 1)
 
-        # 6. SMS Sender ID
+        # 5. SMS Sender ID
         self.lbl_sms_sender = QLabel("SMS Sender ID (Mask):")
         self.lbl_sms_sender.setStyleSheet("font-weight: 600;")
         self.txt_sms_sender = QLineEdit()
-        self.txt_sms_sender.setPlaceholderText("e.g. Jaffna Gold, FastPOS")
-        form_layout.addWidget(self.lbl_sms_sender, 7, 0)
-        form_layout.addWidget(self.txt_sms_sender, 7, 1)
+        self.txt_sms_sender.setPlaceholderText("e.g. StoreName, FastPOS")
+        form_layout.addWidget(self.lbl_sms_sender, 6, 0)
+        form_layout.addWidget(self.txt_sms_sender, 6, 1)
 
-        # 7. Auto Live Sync Background Toggle
+        # 6. Auto Live Sync Background Toggle
         self.lbl_auto_sync = QLabel("Auto Live Sync:")
         self.lbl_auto_sync.setStyleSheet("font-weight: 600;")
         auto_sync_box = QHBoxLayout()
@@ -245,10 +225,10 @@ class SettingsDialog(QDialog):
         auto_sync_box.addWidget(self.btn_auto_sync_off)
         auto_sync_box.addStretch()
 
-        form_layout.addWidget(self.lbl_auto_sync, 8, 0)
-        form_layout.addLayout(auto_sync_box, 8, 1)
+        form_layout.addWidget(self.lbl_auto_sync, 7, 0)
+        form_layout.addLayout(auto_sync_box, 7, 1)
 
-        # 8. Auto-Send Customer SMS
+        # 7. Auto-Send Customer SMS
         self.lbl_sms_toggle = QLabel("Auto SMS Receipts:")
         self.lbl_sms_toggle.setStyleSheet("font-weight: 600;")
         
@@ -268,10 +248,10 @@ class SettingsDialog(QDialog):
         sms_btn_box.addWidget(self.btn_sms_off)
         sms_btn_box.addStretch()
 
-        form_layout.addWidget(self.lbl_sms_toggle, 9, 0)
-        form_layout.addLayout(sms_btn_box, 9, 1)
+        form_layout.addWidget(self.lbl_sms_toggle, 8, 0)
+        form_layout.addLayout(sms_btn_box, 8, 1)
 
-        # 9. SMS Quick Test Tool
+        # 8. SMS Quick Test Tool
         self.lbl_sms_test = QLabel("Test SMS Gateway:")
         self.lbl_sms_test.setStyleSheet("font-weight: 600;")
         
@@ -288,8 +268,8 @@ class SettingsDialog(QDialog):
         test_sms_box.addWidget(self.txt_test_phone)
         test_sms_box.addWidget(self.btn_send_test_sms)
 
-        form_layout.addWidget(self.lbl_sms_test, 10, 0)
-        form_layout.addLayout(test_sms_box, 10, 1)
+        form_layout.addWidget(self.lbl_sms_test, 9, 0)
+        form_layout.addLayout(test_sms_box, 9, 1)
 
         layout.addWidget(self.form_frame)
 
@@ -350,24 +330,6 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(self.btn_save)
 
         layout.addLayout(btn_layout)
-
-    def on_preset_changed(self, index: int):
-        presets = {
-            1: {"url": "http://127.0.0.1:8000", "mask": "Jaffna Gold", "name": "Jaffna Gold"},
-            2: {"url": "http://127.0.0.1:8001", "mask": "Plus Store", "name": "Plus Store"},
-            3: {"url": "http://127.0.0.1:8002", "mask": "Thihariya Tiles", "name": "Thihariya Tiles"},
-            4: {"url": "http://127.0.0.1:8003", "mask": "DLB Lottery", "name": "DLB"},
-            5: {"url": "http://127.0.0.1:8004", "mask": "RNZ System", "name": "RNZ"},
-            6: {"url": "http://127.0.0.1:8005", "mask": "Vavuniya Jaffna Gold", "name": "Vav Jaffna Gold"},
-            7: {"url": "https://jaffnagold.com", "mask": "Jaffna Gold", "name": "Jaffna Gold Cloud"},
-        }
-        if index in presets:
-            item = presets[index]
-            self.txt_tenant.setText(item["url"])
-            self.txt_sms_sender.setText(item["mask"])
-            t = get_theme_tokens(self.current_theme)
-            self.lbl_test_status.setText(f"💡 Selected preset: {item['name']} ({item['url']})")
-            self.lbl_test_status.setStyleSheet(f"color: {t['accent']}; font-size: 12px;")
 
     def set_local_server_url(self):
         self.txt_tenant.setText("http://127.0.0.1:8000")
@@ -457,28 +419,6 @@ class SettingsDialog(QDialog):
                     font-weight: bold;
                 }
             """)
-
-        # Preset Selector Style
-        self.cmb_preset.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {t['input_bg']};
-                color: {t['text_primary']};
-                border: 1px solid {t['border']};
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 12px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 24px;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {t['bg_card']};
-                color: {t['text_primary']};
-                selection-background-color: {t['accent']};
-                selection-color: {'#0f172a' if mode == 'dark' else '#ffffff'};
-            }}
-        """)
 
         # Local Helper Button
         self.btn_use_local.setStyleSheet(f"""
@@ -815,26 +755,6 @@ class SettingsDialog(QDialog):
         self.set_auto_sync_enabled(self.auto_sync_enabled)
         self.auto_sms_enabled = settings.get("auto_sms_enabled", "1")
         self.set_sms_enabled(self.auto_sms_enabled)
-
-        # Match preset
-        cur = self.original_tenant.rstrip("/")
-        if "127.0.0.1:8000" in cur:
-            self.cmb_preset.setCurrentIndex(1)
-        elif "127.0.0.1:8001" in cur:
-            self.cmb_preset.setCurrentIndex(2)
-        elif "127.0.0.1:8002" in cur:
-            self.cmb_preset.setCurrentIndex(3)
-        elif "127.0.0.1:8003" in cur:
-            self.cmb_preset.setCurrentIndex(4)
-        elif "127.0.0.1:8004" in cur:
-            self.cmb_preset.setCurrentIndex(5)
-        elif "127.0.0.1:8005" in cur:
-            self.cmb_preset.setCurrentIndex(6)
-        elif "jaffnagold.com" in cur:
-            self.cmb_preset.setCurrentIndex(7)
-        else:
-            self.cmb_preset.setCurrentIndex(0)
-
         self.update_url_preview()
 
     def update_url_preview(self):

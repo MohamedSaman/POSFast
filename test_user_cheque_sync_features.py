@@ -159,17 +159,24 @@ def run_tests():
     # -------------------------------------------------------------
     # Test 6: Live Laravel Endpoint Check (if running locally)
     # -------------------------------------------------------------
-    print("\n[TEST 6] Live Local Laravel Server Verification:")
+    print("\n[TEST 6] Live Local Laravel Server Verification (FASTPOS_TOKEN Security):")
     local_url = "http://127.0.0.1:8000/api/v1/pos/users"
     try:
-        resp = requests.get(local_url, timeout=2.0)
+        # 6.1 Verify unauthorized request is blocked (HTTP 401)
+        resp_no_token = requests.get(local_url, timeout=2.0)
+        assert resp_no_token.status_code == 401, f"Expected 401 without token, got {resp_no_token.status_code}"
+        print(f"  ✓ Unauthenticated request blocked correctly with HTTP 401: {resp_no_token.json().get('message')}")
+
+        # 6.2 Verify request with correct FASTPOS_TOKEN succeeds (HTTP 200)
+        auth_headers = {"Authorization": "Bearer 123456", "Content-Type": "application/json"}
+        resp = requests.get(local_url, headers=auth_headers, timeout=2.0)
         if resp.status_code == 200:
             live_users = resp.json().get("users", [])
-            print(f"  ✓ Live Laravel server reachable! /pos/users returned {len(live_users)} users:")
+            print(f"  ✓ Live Laravel server authorized! /pos/users returned {len(live_users)} users:")
             for u in live_users[:5]:
                 print(f"    - ID {u.get('id')}: {u.get('name')} ({u.get('role')})")
             
-            # Test live push to Laravel
+            # Test live push to Laravel with auth token
             push_url = "http://127.0.0.1:8000/api/v1/pos/invoices/sync"
             live_payload = {
                 "invoices": [
@@ -202,7 +209,7 @@ def run_tests():
                     }
                 ]
             }
-            push_resp = requests.post(push_url, json=live_payload, timeout=5.0)
+            push_resp = requests.post(push_url, json=live_payload, headers=auth_headers, timeout=5.0)
             print(f"  ✓ Live invoice push returned HTTP {push_resp.status_code}: {push_resp.text[:120]}")
             assert push_resp.status_code in [200, 201], f"Push failed: {push_resp.text}"
         else:

@@ -603,9 +603,16 @@ class SyncWorker(QThread):
                         "message": f"Connection Successful! Connected to {base_url} (HTTP {res.status_code})"
                     }
                 elif res.status_code in [401, 403]:
+                    try:
+                        err_json = res.json()
+                        err_msg = err_json.get("message")
+                    except Exception:
+                        err_msg = None
+                    if not err_msg:
+                        err_msg = f"FastPOS Access Token was rejected (HTTP {res.status_code}). Please verify FASTPOS_TOKEN in your system .env."
                     return {
                         "success": False,
-                        "message": f"Server reached, but API Token was rejected (HTTP {res.status_code})."
+                        "message": err_msg
                     }
             except Exception:
                 continue
