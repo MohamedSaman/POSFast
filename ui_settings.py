@@ -852,7 +852,7 @@ class SettingsDialog(QDialog):
             self.lbl_test_status.setText(f"✓ {result.get('message')}")
             self.lbl_test_status.setStyleSheet(f"color: {t['success']}; font-size: 12px; font-weight: bold;")
             if self.sync_worker:
-                self.sync_worker.users_synced.emit(count)
+                self.sync_worker.users_synced.emit(count, result.get("message", f"Synced {count} staff users"))
             QMessageBox.information(
                 self,
                 "Staff Users Synced",
@@ -868,8 +868,10 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Validation", "Server URL cannot be empty.")
             return
 
+        tenant_changed = hasattr(self, 'original_tenant') and (new_tenant.rstrip('/') != self.original_tenant.rstrip('/'))
+
         # Safety Guard: Tenant Isolation Check
-        if hasattr(self, 'original_tenant') and new_tenant != self.original_tenant:
+        if tenant_changed:
             can_switch, pending_count = self.db.can_switch_tenant()
             if not can_switch:
                 QMessageBox.critical(
@@ -880,6 +882,11 @@ class SettingsDialog(QDialog):
                     "Please connect online and synchronize all offline bills before switching tenants."
                 )
                 return
+
+            # Purge previous domain's cached users, product sync timestamps and sales sync timestamps
+            self.db.clear_users()
+            self.db.set_setting("last_product_sync", "")
+            self.db.set_setting("last_sales_sync", "")
 
         # Persist settings
         self.db.set_setting("tenant_subdomain", new_tenant)
@@ -893,7 +900,7 @@ class SettingsDialog(QDialog):
         self.db.set_setting("auto_sync_enabled", getattr(self, "auto_sync_enabled", "1"))
 
         if self.sync_worker:
-            self.sync_worker.request_immediate_sync(sync_products=True)
+            self.sync_worker.request_immediate_sync(sync_products=True, sync_users=True)
 
         self.settings_saved.emit()
         self.accept()

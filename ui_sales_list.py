@@ -333,6 +333,18 @@ class LiveSalesSyncWorker(QThread):
         try:
             from sync_worker import SyncWorker
             worker = SyncWorker(self.db)
+            # Sync users too so staff filter is up to date with active server
+            try:
+                settings = self.db.get_all_settings()
+                tenant = settings.get("tenant_subdomain", "jaffnagold.com")
+                base = settings.get("base_domain", "webxkey.lk")
+                token = settings.get("api_token", "")
+                terminal = settings.get("terminal_id", "POS-01")
+                base_url = worker.build_base_url(tenant, base)
+                headers = worker.get_headers(token, terminal)
+                worker.sync_users(base_url, headers)
+            except Exception:
+                pass
             ok, count, total_amt, msg = worker.pull_domain_sales(target_date=self.target_date)
             self.sync_finished.emit(ok, count, total_amt, msg)
         except Exception as e:
@@ -824,6 +836,8 @@ class SalesListDialog(QDialog):
         if ok:
             self.lbl_sync_indicator.setText(f"🟢 Domain Live Connected: {count} bills synced ({clean_host})")
             self.lbl_sync_indicator.setStyleSheet("font-size: 12px; color: #2ecc71; font-weight: 600;")
+            # Repopulate cashier dropdown with the fresh server users
+            self._populate_cashier_dropdown()
         else:
             self.lbl_sync_indicator.setText(f"⚠️ Offline / Cached Mode ({msg})")
             self.lbl_sync_indicator.setStyleSheet("font-size: 12px; color: #f39c12; font-weight: 600;")

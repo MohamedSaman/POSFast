@@ -308,14 +308,18 @@ class DatabaseManager:
             inv_count = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM held_bills")
             held_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
 
             cursor.execute("DELETE FROM products;")
             cursor.execute("DELETE FROM invoices;")
             cursor.execute("DELETE FROM held_bills;")
+            cursor.execute("DELETE FROM users;")
 
-            # Reset sync timestamps so next sync downloads fresh full catalog & sales
+            # Reset sync timestamps so next sync downloads fresh full catalog, sales & users
             cursor.execute("INSERT INTO settings (key, value) VALUES ('last_product_sync', '') ON CONFLICT(key) DO UPDATE SET value = '';")
             cursor.execute("INSERT INTO settings (key, value) VALUES ('last_sales_sync', '') ON CONFLICT(key) DO UPDATE SET value = '';")
+            cursor.execute("UPDATE settings SET value = '' WHERE key IN ('cashier_user_id', 'cashier_name', 'cashier_role');")
 
             if not preserve_settings:
                 cursor.execute("DELETE FROM settings;")
@@ -328,9 +332,11 @@ class DatabaseManager:
                 "products": prod_count,
                 "invoices": inv_count,
                 "held_bills": held_count,
+                "users": user_count,
                 "products_cleared": prod_count,
                 "invoices_cleared": inv_count,
-                "held_bills_cleared": held_count
+                "held_bills_cleared": held_count,
+                "users_cleared": user_count
             }
 
     # --- Products CRUD ---
@@ -519,14 +525,19 @@ class DatabaseManager:
             conn.commit()
 
     # --- Users & Cashiers CRUD ---
-    def upsert_users(self, users: List[Dict[str, Any]]) -> int:
-        """Batch upsert users/cashiers from Laravel API /pos/users."""
+    def upsert_users(self, users: List[Dict[str, Any]], replace: bool = True) -> int:
+        """
+        Batch upsert users/cashiers from Laravel API /pos/users.
+        If replace=True, removes any local cached users that are not in the new active list,
+        ensuring deleted users or users from old domains are purged immediately.
+        """
         if not users:
             return 0
         now = datetime.now().isoformat()
         count = 0
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            valid_ids = []
             for u in users:
                 uid = u.get("id")
                 name = u.get("name")
@@ -543,9 +554,23 @@ class DatabaseManager:
                         email = excluded.email,
                         updated_at = excluded.updated_at
                 """, (uid, name, role, email, now))
+                valid_ids.append(uid)
                 count += 1
+
+            if replace and valid_ids:
+                placeholders = ",".join("?" for _ in valid_ids)
+                cursor.execute(f"DELETE FROM users WHERE id NOT IN ({placeholders})", valid_ids)
+
             conn.commit()
         return count
+
+    def clear_users(self):
+        """Purges all cached users from local storage."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM users")
+            cursor.execute("UPDATE settings SET value = '' WHERE key IN ('cashier_user_id', 'cashier_name', 'cashier_role')")
+            conn.commit()
 
     def get_all_users(self) -> List[Dict[str, Any]]:
         """Return all users/cashiers ordered by name."""

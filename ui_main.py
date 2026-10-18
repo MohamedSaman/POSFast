@@ -2866,6 +2866,7 @@ class MainWindow(QMainWindow):
         if self.sync_worker:
             self.sync_worker.status_changed.connect(self.on_sync_status_changed)
             self.sync_worker.product_sync_completed.connect(self.on_product_sync_completed)
+            self.sync_worker.users_synced.connect(self.on_users_synced)
 
         # Initial check of pending count
         count = self.db.get_pending_invoice_count()
@@ -2919,10 +2920,19 @@ class MainWindow(QMainWindow):
     def on_product_sync_completed(self, count: int, message: str):
         self.show_status_bar_message(f"Catalog Sync: {message}")
 
+    def on_users_synced(self, count: int, message: str):
+        self.show_status_bar_message(f"Staff Sync: {message}")
+        active_u = self.db.get_active_cashier_user()
+        self.current_cashier_id = active_u.get("id", 1)
+        self.current_cashier_name = active_u.get("name", "Admin")
+        self.current_cashier_role = active_u.get("role", "staff")
+        if hasattr(self, 'btn_cashier'):
+            self.btn_cashier.setText(f"👤 {self.current_cashier_name} [{self.current_cashier_role}] (Ctrl+U)")
+
     def trigger_manual_sync(self):
         if self.sync_worker:
-            self.sync_worker.request_immediate_sync(sync_products=True)
-            self.show_status_bar_message("Sync triggered...")
+            self.sync_worker.request_immediate_sync(sync_products=True, sync_users=True)
+            self.show_status_bar_message("Sync triggered for products and users...")
 
     # --- Totals Calculation ---
     def update_totals_display(self, subtotal: Decimal, discount: Decimal, tax: Decimal, grand_total: Decimal):
