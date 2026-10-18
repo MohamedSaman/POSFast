@@ -3198,6 +3198,8 @@ class MainWindow(QMainWindow):
             initial_synced = 0 # Saved locally first; worker will push if online
 
             extra_disc = getattr(checkout_dlg, 'extra_discount', Decimal('0.00'))
+            final_total_discount = getattr(self, 'discount_total', Decimal('0.00')) + extra_disc
+            final_grand_total = getattr(checkout_dlg, 'grand_total', self.grand_total)
             active_u = self.db.get_active_cashier_user()
             user_id = active_u.get("id") or getattr(self, "current_cashier_id", 1)
             cashier_name = active_u.get("name") or getattr(self, "current_cashier_name", "Admin")
