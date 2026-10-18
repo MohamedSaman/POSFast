@@ -168,6 +168,28 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN due_amount REAL DEFAULT 0.0;")
             if "split_payments" not in columns:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN split_payments TEXT;")
+            if "user_id" not in columns:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN user_id INTEGER;")
+            if "cashier_name" not in columns:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN cashier_name TEXT;")
+            if "cheque_no" not in columns:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN cheque_no TEXT;")
+            if "bank_name" not in columns:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN bank_name TEXT;")
+            if "cheque_date" not in columns:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN cheque_date TEXT;")
+
+            # 4. Users / Cashiers Table (synced from Laravel API /pos/users)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    role TEXT,
+                    email TEXT,
+                    updated_at TEXT
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);")
 
             # 4. Held / Parked Bills Table (for F3 Hold / F4 Recall)
             cursor.execute("""
@@ -496,12 +518,100 @@ class DatabaseManager:
             """, (qty, product_id))
             conn.commit()
 
+    # --- Users & Cashiers CRUD ---
+    def upsert_users(self, users: List[Dict[str, Any]]) -> int:
+        """Batch upsert users/cashiers from Laravel API /pos/users."""
+        if not users:
+            return 0
+        now = datetime.now().isoformat()
+        count = 0
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for u in users:
+                uid = u.get("id")
+                name = u.get("name")
+                if not uid or not name:
+                    continue
+                role = u.get("role", "staff")
+                email = u.get("email", "")
+                cursor.execute("""
+                    INSERT INTO users (id, name, role, email, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        name = excluded.name,
+                        role = excluded.role,
+                        email = excluded.email,
+                        updated_at = excluded.updated_at
+                """, (uid, name, role, email, now))
+                count += 1
+            conn.commit()
+        return count
+
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        """Return all users/cashiers ordered by name."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users ORDER BY name ASC")
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_user_count(self) -> int:
+        """Return total number of cached users."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM users")
+            return cursor.fetchone()[0]
+
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Return user dict by ID."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_active_cashier_user(self) -> Dict[str, Any]:
+        """
+        Retrieves active cashier user.
+        Checks cashier_user_id in settings first, matches with users table,
+        or falls back to first available user or Admin.
+        """
+        settings = self.get_all_settings()
+        uid_str = settings.get("cashier_user_id")
+        name = settings.get("cashier_name", "Admin")
+        role = settings.get("cashier_role", "admin")
+        if uid_str:
+            try:
+                uid = int(uid_str)
+                u = self.get_user_by_id(uid)
+                if u:
+                    return u
+            except Exception:
+                pass
+
+        all_u = self.get_all_users()
+        if all_u:
+            for u in all_u:
+                if u["name"].lower() == name.lower():
+                    return u
+            return all_u[0]
+        return {"id": 1, "name": name, "role": role, "email": ""}
+
+    def set_active_cashier_user(self, user_id: int, user_name: str, role: str = "staff"):
+        """Saves selected cashier into settings."""
+        self.set_setting("cashier_user_id", str(user_id))
+        self.set_setting("cashier_name", user_name)
+        self.set_setting("cashier_role", role)
+
     # --- Invoices CRUD ---
     def create_invoice(self, data: Dict[str, Any], is_synced: int = 0) -> int:
         """Creates an invoice record and deducts local inventory."""
         items_json = data.get("items_json")
+        if items_json is None and "items" in data:
+            items_json = data.get("items")
         if isinstance(items_json, (list, dict)):
             items_json = json.dumps(items_json)
+        elif items_json is None:
+            items_json = "[]"
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -516,7 +626,8 @@ class DatabaseManager:
                     bill_no = self.get_next_bill_number()
             data["bill_no"] = bill_no
 
-            paid_amount = float(data.get("paid_amount", data["grand_total"]))
+            grand_total = float(data.get("grand_total", data.get("net_total", 0.0)))
+            paid_amount = float(data.get("paid_amount", data.get("tendered_amount", grand_total)))
             due_amount = float(data.get("due_amount", 0.0))
             split_payments = data.get("split_payments")
             if isinstance(split_payments, (dict, list)):
@@ -529,16 +640,17 @@ class DatabaseManager:
             cursor.execute("""
                 INSERT INTO invoices (
                     bill_no, customer_name, customer_phone, subtotal, discount, tax, 
-                    grand_total, paid_amount, due_amount, payment_method, split_payments, items_json, is_synced, sms_sent, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    grand_total, paid_amount, due_amount, payment_method, split_payments, items_json, is_synced, sms_sent, created_at,
+                    user_id, cashier_name, cheque_no, bank_name, cheque_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 bill_no,
                 data.get("customer_name", "Walk-In"),
                 data.get("customer_phone", ""),
-                float(data["subtotal"]),
-                float(data.get("discount", 0.0)),
-                float(data.get("tax", 0.0)),
-                float(data["grand_total"]),
+                float(data.get("subtotal", 0.0)),
+                float(data.get("discount", data.get("discount_amount", 0.0))),
+                float(data.get("tax", data.get("tax_amount", 0.0))),
+                grand_total,
                 paid_amount,
                 due_amount,
                 data.get("payment_method", "CASH"),
@@ -546,7 +658,12 @@ class DatabaseManager:
                 items_json,
                 is_synced,
                 int(data.get("sms_sent", 0)),
-                data.get("created_at") or datetime.now().isoformat()
+                data.get("created_at") or datetime.now().isoformat(),
+                data.get("user_id"),
+                data.get("cashier_name"),
+                data.get("cheque_no"),
+                data.get("bank_name"),
+                data.get("cheque_date")
             ))
             invoice_id = cursor.lastrowid
 
@@ -671,6 +788,11 @@ class DatabaseManager:
         pay_method = inv_data.get("payment_method") or "CASH"
         created_at = inv_data.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         sms_sent = int(inv_data.get("sms_sent", 1 if cust_phone else 0))
+        user_id = inv_data.get("user_id")
+        cashier_name = inv_data.get("cashier_name")
+        cheque_no = inv_data.get("cheque_no")
+        bank_name = inv_data.get("bank_name")
+        cheque_date = inv_data.get("cheque_date")
 
         due_amount = float(inv_data.get("due_amount", 0.0))
         paid_amount = float(inv_data.get("paid_amount", grand_total - due_amount))
@@ -700,6 +822,11 @@ class DatabaseManager:
                         payment_method = ?,
                         split_payments = CASE WHEN ? IS NOT NULL THEN ? ELSE split_payments END,
                         items_json = CASE WHEN ? != '[]' THEN ? ELSE items_json END,
+                        user_id = CASE WHEN ? IS NOT NULL THEN ? ELSE user_id END,
+                        cashier_name = CASE WHEN ? IS NOT NULL THEN ? ELSE cashier_name END,
+                        cheque_no = CASE WHEN ? IS NOT NULL THEN ? ELSE cheque_no END,
+                        bank_name = CASE WHEN ? IS NOT NULL THEN ? ELSE bank_name END,
+                        cheque_date = CASE WHEN ? IS NOT NULL THEN ? ELSE cheque_date END,
                         is_synced = 1
                     WHERE id = ?
                 """, (
@@ -710,6 +837,11 @@ class DatabaseManager:
                     pay_method,
                     split_payments_json, split_payments_json,
                     items_json, items_json,
+                    user_id, user_id,
+                    cashier_name, cashier_name,
+                    cheque_no, cheque_no,
+                    bank_name, bank_name,
+                    cheque_date, cheque_date,
                     row[0]
                 ))
                 conn.commit()
@@ -718,33 +850,46 @@ class DatabaseManager:
                 cursor.execute("""
                     INSERT INTO invoices (
                         bill_no, customer_name, customer_phone, subtotal, discount, tax,
-                        grand_total, paid_amount, due_amount, payment_method, split_payments, items_json, is_synced, sms_sent, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        grand_total, paid_amount, due_amount, payment_method, split_payments, items_json, is_synced, sms_sent, created_at,
+                        user_id, cashier_name, cheque_no, bank_name, cheque_date
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     bill_no, cust_name, cust_phone, subtotal, discount, tax,
-                    grand_total, paid_amount, due_amount, pay_method, split_payments_json, items_json, 1, sms_sent, created_at
+                    grand_total, paid_amount, due_amount, pay_method, split_payments_json, items_json, 1, sms_sent, created_at,
+                    user_id, cashier_name, cheque_no, bank_name, cheque_date
                 ))
                 conn.commit()
                 return True
 
-    def get_todays_invoices(self, date_str: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Fetch all invoices for today (or specified date YYYY-MM-DD / 'all'), with parsed items."""
+    def get_todays_invoices(self, date_str: Optional[str] = None, user_id: Optional[Any] = None) -> List[Dict[str, Any]]:
+        """Fetch all invoices for today (or specified date YYYY-MM-DD / 'all'), optionally filtered by user_id/cashier."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            params: List[Any] = []
+            where_clauses: List[str] = []
+
             if date_str in ["all", "recent"]:
-                cursor.execute("""
-                    SELECT * FROM invoices 
-                    ORDER BY created_at DESC, id DESC 
-                    LIMIT 50
-                """)
+                pass
             else:
                 if not date_str:
                     date_str = datetime.now().strftime("%Y-%m-%d")
-                cursor.execute("""
-                    SELECT * FROM invoices 
-                    WHERE created_at LIKE ? 
-                    ORDER BY created_at DESC, id DESC
-                """, (f"{date_str}%",))
+                where_clauses.append("created_at LIKE ?")
+                params.append(f"{date_str}%")
+
+            if user_id is not None and str(user_id).strip() not in ("all", "", "0", "-1"):
+                try:
+                    u_int = int(user_id)
+                    where_clauses.append("(user_id = ?)")
+                    params.append(u_int)
+                except (ValueError, TypeError):
+                    where_clauses.append("(cashier_name = ?)")
+                    params.append(str(user_id).strip())
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+            limit_sql = "LIMIT 50" if date_str in ["all", "recent"] else ""
+
+            query = f"SELECT * FROM invoices {where_sql} ORDER BY created_at DESC, id DESC {limit_sql}"
+            cursor.execute(query, tuple(params))
 
             rows = cursor.fetchall()
             result = []

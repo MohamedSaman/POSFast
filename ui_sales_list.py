@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QMessageBox, QFrame, QPlainTextEdit, QApplication, QInputDialog,
-    QSizePolicy
+    QSizePolicy, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QFont, QColor, QKeyEvent
@@ -109,6 +109,17 @@ def format_thermal_receipt(inv: Dict[str, Any], tenant_subdomain: str = "dbl", c
             pay_lines.append(f"{'  • Cash:':<24}Rs. {cash_p:>10.2f}")
             ref_str = f" [{sec_ref}]" if sec_ref else ""
             pay_lines.append(f"{'  • ' + sec_m + ref_str + ':':<24}Rs. {sec_p:>10.2f}")
+    elif payment == "CHEQUE" or inv.get("cheque_no"):
+        ch_no = inv.get("cheque_no") or ""
+        bank = inv.get("bank_name") or ""
+        ch_dt = inv.get("cheque_date") or ""
+        pay_lines.append(f"{'Payment Method:':<24}{'CHEQUE':>14}")
+        if ch_no:
+            pay_lines.append(f"{'  • Cheque No:':<24}{ch_no:>14}")
+        if bank:
+            pay_lines.append(f"{'  • Bank Name:':<24}{bank:>14}")
+        if ch_dt:
+            pay_lines.append(f"{'  • Cheque Date:':<24}{ch_dt:>14}")
     elif float(inv.get('due_amount', 0.0) or 0.0) > 0:
         paid_val = float(inv.get('paid_amount', grand_total - float(inv.get('due_amount', 0.0) or 0.0)))
         pay_lines.append(f"{'Amount Paid:':<24}Rs. {paid_val:>10.2f}")
@@ -434,9 +445,37 @@ class SalesListDialog(QDialog):
         date_box.addWidget(self.btn_date_all)
         h_layout.addLayout(date_box)
 
+        # Cashier / Staff Filter Dropdown
+        cashier_box = QHBoxLayout()
+        cashier_box.setSpacing(6)
+        lbl_c_filter = QLabel("👤 Staff:")
+        lbl_c_filter.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {t['text_muted']};")
+        self.cmb_cashier_filter = QComboBox()
+        self.cmb_cashier_filter.setFixedHeight(32)
+        self.cmb_cashier_filter.setMinimumWidth(160)
+        self.cmb_cashier_filter.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {t['input_bg']};
+                color: {t['input_text']};
+                border: 1px solid {t['border']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+            }}
+        """)
+        self._populate_cashier_dropdown()
+        self.cmb_cashier_filter.currentIndexChanged.connect(self._on_cashier_filter_changed)
+        cashier_box.addWidget(lbl_c_filter)
+        cashier_box.addWidget(self.cmb_cashier_filter)
+        h_layout.addLayout(cashier_box)
+
         # Search Filter Box
         self.txt_filter = QLineEdit()
-        self.txt_filter.setPlaceholderText("🔍 Filter by Bill #, Customer, Phone...")
+        self.txt_filter.setPlaceholderText("🔍 Filter by Bill #, Customer, Staff, Cheque...")
         self.txt_filter.setFixedWidth(240)
         self.txt_filter.setStyleSheet(f"""
             QLineEdit {{
@@ -734,9 +773,35 @@ class SalesListDialog(QDialog):
                     }}
                 """)
 
+    def _populate_cashier_dropdown(self):
+        self.cmb_cashier_filter.blockSignals(True)
+        self.cmb_cashier_filter.clear()
+        self.cmb_cashier_filter.addItem("👥 All Staff Bills", "all")
+        active_u = self.db.get_active_cashier_user()
+        active_name = active_u.get("name") or self.cashier
+        self.cmb_cashier_filter.addItem(f"👤 My Bills Only ({active_name})", "my")
+        users = self.db.get_all_users()
+        for u in users:
+            uid = u.get("id")
+            name = u.get("name")
+            role = u.get("role", "staff")
+            self.cmb_cashier_filter.addItem(f"{name} ({role})", uid)
+        self.cmb_cashier_filter.blockSignals(False)
+
+    def _on_cashier_filter_changed(self):
+        self.load_data(fetch_live=False)
+
     def load_data(self, fetch_live: bool = True):
-        """Fetches all invoices for selected date filter from SQLite, then initiates live domain sync."""
-        self.all_invoices = self.db.get_todays_invoices(self.current_date_filter)
+        """Fetches all invoices for selected date & cashier filter from SQLite, then initiates live domain sync."""
+        selected_cashier = self.cmb_cashier_filter.currentData() if hasattr(self, 'cmb_cashier_filter') else "all"
+        target_uid = None
+        if selected_cashier == "my":
+            active_u = self.db.get_active_cashier_user()
+            target_uid = active_u.get("id") or active_u.get("name")
+        elif selected_cashier != "all" and selected_cashier is not None:
+            target_uid = selected_cashier
+
+        self.all_invoices = self.db.get_todays_invoices(self.current_date_filter, user_id=target_uid)
         self._apply_filter(self.txt_filter.text())
 
         if not fetch_live:
@@ -763,8 +828,16 @@ class SalesListDialog(QDialog):
             self.lbl_sync_indicator.setText(f"⚠️ Offline / Cached Mode ({msg})")
             self.lbl_sync_indicator.setStyleSheet("font-size: 12px; color: #f39c12; font-weight: 600;")
 
-        # Reload SQLite invoices with newly synced bills
-        self.all_invoices = self.db.get_todays_invoices(self.current_date_filter)
+        # Reload SQLite invoices with newly synced bills honoring active cashier filter
+        selected_cashier = self.cmb_cashier_filter.currentData() if hasattr(self, 'cmb_cashier_filter') else "all"
+        target_uid = None
+        if selected_cashier == "my":
+            active_u = self.db.get_active_cashier_user()
+            target_uid = active_u.get("id") or active_u.get("name")
+        elif selected_cashier != "all" and selected_cashier is not None:
+            target_uid = selected_cashier
+
+        self.all_invoices = self.db.get_todays_invoices(self.current_date_filter, user_id=target_uid)
         self._apply_filter(self.txt_filter.text())
 
     @staticmethod
@@ -878,7 +951,10 @@ class SalesListDialog(QDialog):
                 if q in inv.get("bill_no", "").lower()
                 or q in (inv.get("customer_name") or "").lower()
                 or q in (inv.get("customer_phone") or "").lower()
+                or q in (inv.get("cashier_name") or "").lower()
                 or q in inv.get("payment_method", "").lower()
+                or q in (inv.get("cheque_no") or "").lower()
+                or q in (inv.get("bank_name") or "").lower()
             ]
 
         self.filtered_invoices = self._sort_invoices(self.filtered_invoices)
@@ -989,8 +1065,13 @@ class SalesListDialog(QDialog):
                 item_pm = QTableWidgetItem("CARD PAYMENT")
                 item_pm.setForeground(QColor("#06b6d4"))
             elif pm == "CHEQUE":
-                item_pm = QTableWidgetItem("CHEQUE")
+                ch_no = inv.get("cheque_no") or ""
+                b_name = inv.get("bank_name") or ""
+                label = f"CHEQUE #{ch_no}" if ch_no else "CHEQUE"
+                item_pm = QTableWidgetItem(label)
                 item_pm.setForeground(QColor("#f59e0b"))
+                if ch_no or b_name:
+                    item_pm.setToolTip(f"Cheque No: {ch_no}\nBank: {b_name}\nDate: {inv.get('cheque_date', '')}")
             else:
                 item_pm = QTableWidgetItem("CASH")
                 item_pm.setForeground(QColor("#10b981"))

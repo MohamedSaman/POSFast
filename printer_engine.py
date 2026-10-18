@@ -100,6 +100,12 @@ DEFAULT_THERMAL_TEMPLATE = """\
 <table width="100%" cellspacing="0" cellpadding="0"><tr><td style="font-size:3pt;">&nbsp;</td></tr><tr><td style="border-top:1px dashed #000; font-size:3pt;">&nbsp;</td></tr></table>
 <table width="100%" cellspacing="0" cellpadding="2" style="font-size:9pt;">
   <tr><td width="45%"><b>Payment Method</b></td><td>: <b>{{ payment_method }}{% if due_amount_raw > 0 %} (DUE SALE){% endif %}</b></td></tr>
+  {% if cheque_info %}
+  <tr><td colspan="2" style="font-size:8pt; padding-left:8px;">
+    <b>- Cheque No:</b> {{ cheque_info.cheque_no }}<br>
+    <b>- Bank Name:</b> {{ cheque_info.bank_name }}{% if cheque_info.cheque_date %}<br><b>- Cheque Date:</b> {{ cheque_info.cheque_date }}{% endif %}
+  </td></tr>
+  {% endif %}
   {% if split_info %}
   <tr><td colspan="2" style="font-size:8pt; padding-left:8px;">
     <b>- Cash Paid:</b> Rs. {{ split_info.cash }}<br>
@@ -281,15 +287,24 @@ class POSPrinterEngine:
                 "sec_ref": sp_data.get("secondary_ref", ""),
             }
 
+        cheque_info = None
+        if inv.get("payment_method") == "CHEQUE" or inv.get("cheque_no"):
+            cheque_info = {
+                "cheque_no": inv.get("cheque_no", ""),
+                "bank_name": inv.get("bank_name", ""),
+                "cheque_date": inv.get("cheque_date", ""),
+            }
+
         return {
             "shop_name": cfg["shop_name"], "shop_address": cfg["shop_address"],
             "shop_phone": cfg["shop_phone"], "shop_hotline": cfg["shop_hotline"],
             "shop_logo": "", "footer_lines": footer, "footer_note": " ".join(footer),
             "bill_no": bill_no, "date": dt.strftime("%d-%m-%Y"), "time": dt.strftime("%I:%M %p"),
-            "cashier": self.db.get_setting("cashier_name", "Admin"),
+            "cashier": inv.get("cashier_name") or self.db.get_setting("cashier_name", "Admin"),
             "customer_name": inv.get("customer_name") or "Walk-In",
             "payment_method": inv.get("payment_method", "CASH"),
             "split_info": split_info,
+            "cheque_info": cheque_info,
             "items": rows, "total_items": fmt_qty(total_qty),
             "subtotal": fmt_money(subtotal),
             "discount": fmt_money(discount), "discount_raw": discount,

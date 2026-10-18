@@ -6,7 +6,7 @@ API Bearer tokens, terminal identification, theme switching (Dark & Light), and 
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QPushButton, QMessageBox, QFrame, QGridLayout, QProgressBar, QApplication
+    QPushButton, QMessageBox, QFrame, QGridLayout, QProgressBar, QApplication, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from database import DatabaseManager
@@ -32,6 +32,36 @@ class TestConnectionWorker(QThread):
         self.finished.emit(result)
 
 
+class SyncUsersWorker(QThread):
+    finished = pyqtSignal(dict)
+
+    def __init__(self, db: DatabaseManager, tenant: str, base_domain: str, token: str, terminal: str):
+        super().__init__()
+        self.db = db
+        self.tenant = tenant
+        self.base_domain = base_domain
+        self.token = token
+        self.terminal = terminal
+
+    def run(self):
+        worker = SyncWorker(self.db)
+        base_url = worker.build_base_url(self.tenant, self.base_domain)
+        headers = worker.get_headers(self.token, self.terminal)
+        try:
+            count = worker.sync_users(base_url, headers)
+            self.finished.emit({
+                "success": True,
+                "count": count,
+                "message": f"Successfully synced {count} staff/cashier users from server!"
+            })
+        except Exception as e:
+            self.finished.emit({
+                "success": False,
+                "count": 0,
+                "message": f"Failed to sync users: {str(e)}"
+            })
+
+
 class SettingsDialog(QDialog):
     settings_saved = pyqtSignal()
     theme_changed = pyqtSignal(str)
@@ -45,7 +75,7 @@ class SettingsDialog(QDialog):
         self.auto_sms_enabled = "1"
         self.auto_sync_enabled = "1"
         self.setWindowTitle("System & Multi-Tenant Settings (F12)")
-        self.setFixedSize(640, 840)
+        self.setFixedSize(660, 870)
         self.setModal(True)
         self.init_ui()
         self.load_settings()
@@ -96,7 +126,27 @@ class SettingsDialog(QDialog):
         form_layout.addWidget(self.lbl_theme, 0, 0)
         form_layout.addLayout(theme_box, 0, 1)
 
-        # 1. Tenant Subdomain / Server URL
+        # 1. System Preset Selector
+        self.lbl_preset = QLabel("System Preset:")
+        self.lbl_preset.setStyleSheet("font-weight: 600;")
+        self.cmb_preset = QComboBox()
+        self.cmb_preset.setFixedHeight(32)
+        self.cmb_preset.addItems([
+            "-- Select System Preset --",
+            "🏢 Jaffna Gold (Local: http://127.0.0.1:8000)",
+            "🏢 Plus Store (Local: http://127.0.0.1:8001)",
+            "🏢 Thihariya Tiles (Local: http://127.0.0.1:8002)",
+            "🏢 DLB Lottery (Local: http://127.0.0.1:8003)",
+            "🏢 RNZ System (Local: http://127.0.0.1:8004)",
+            "🏢 Vavuniya Jaffna Gold (Local: http://127.0.0.1:8005)",
+            "☁️ Jaffna Gold Cloud (https://jaffnagold.com)",
+            "⚙️ Custom / Manual Server URL",
+        ])
+        self.cmb_preset.currentIndexChanged.connect(self.on_preset_changed)
+        form_layout.addWidget(self.lbl_preset, 1, 0)
+        form_layout.addWidget(self.cmb_preset, 1, 1)
+
+        # 2. Tenant Subdomain / Server URL
         self.lbl_tenant = QLabel("Server URL:")
         self.lbl_tenant.setStyleSheet("font-weight: 600;")
         
@@ -119,8 +169,8 @@ class SettingsDialog(QDialog):
         local_row.addStretch()
         url_box.addLayout(local_row)
 
-        form_layout.addWidget(self.lbl_tenant, 1, 0)
-        form_layout.addLayout(url_box, 1, 1)
+        form_layout.addWidget(self.lbl_tenant, 2, 0)
+        form_layout.addLayout(url_box, 2, 1)
 
         # Base Domain (hidden internal fallback)
         self.txt_base = QLineEdit("webxkey.lk")
@@ -132,8 +182,8 @@ class SettingsDialog(QDialog):
         self.lbl_preview.setStyleSheet("color: #a0aec0; font-size: 11px;")
         self.lbl_url_preview = QLabel()
         self.lbl_url_preview.setStyleSheet("color: #00e5ff; font-family: monospace; font-size: 11px;")
-        form_layout.addWidget(self.lbl_preview, 2, 0)
-        form_layout.addWidget(self.lbl_url_preview, 2, 1)
+        form_layout.addWidget(self.lbl_preview, 3, 0)
+        form_layout.addWidget(self.lbl_url_preview, 3, 1)
 
         # 3. API Bearer Token
         self.lbl_token = QLabel("API Token / Key:")
@@ -149,32 +199,32 @@ class SettingsDialog(QDialog):
         self.btn_toggle_token.clicked.connect(self.toggle_token_visibility)
         token_box.addWidget(self.txt_token)
         token_box.addWidget(self.btn_toggle_token)
-        form_layout.addWidget(self.lbl_token, 3, 0)
-        form_layout.addLayout(token_box, 3, 1)
+        form_layout.addWidget(self.lbl_token, 4, 0)
+        form_layout.addLayout(token_box, 4, 1)
 
         # 4. Terminal ID
         self.lbl_terminal = QLabel("Terminal / Counter ID:")
         self.lbl_terminal.setStyleSheet("font-weight: 600;")
         self.txt_terminal = QLineEdit()
         self.txt_terminal.setPlaceholderText("e.g. POS-01, COUNTER-A")
-        form_layout.addWidget(self.lbl_terminal, 4, 0)
-        form_layout.addWidget(self.txt_terminal, 4, 1)
+        form_layout.addWidget(self.lbl_terminal, 5, 0)
+        form_layout.addWidget(self.txt_terminal, 5, 1)
 
         # 5. Cashier Name
         self.lbl_cashier = QLabel("Default Cashier:")
         self.lbl_cashier.setStyleSheet("font-weight: 600;")
         self.txt_cashier = QLineEdit()
         self.txt_cashier.setPlaceholderText("e.g. Admin, John, Saman")
-        form_layout.addWidget(self.lbl_cashier, 5, 0)
-        form_layout.addWidget(self.txt_cashier, 5, 1)
+        form_layout.addWidget(self.lbl_cashier, 6, 0)
+        form_layout.addWidget(self.txt_cashier, 6, 1)
 
         # 6. SMS Sender ID
         self.lbl_sms_sender = QLabel("SMS Sender ID (Mask):")
         self.lbl_sms_sender.setStyleSheet("font-weight: 600;")
         self.txt_sms_sender = QLineEdit()
         self.txt_sms_sender.setPlaceholderText("e.g. Jaffna Gold, FastPOS")
-        form_layout.addWidget(self.lbl_sms_sender, 6, 0)
-        form_layout.addWidget(self.txt_sms_sender, 6, 1)
+        form_layout.addWidget(self.lbl_sms_sender, 7, 0)
+        form_layout.addWidget(self.txt_sms_sender, 7, 1)
 
         # 7. Auto Live Sync Background Toggle
         self.lbl_auto_sync = QLabel("Auto Live Sync:")
@@ -195,8 +245,8 @@ class SettingsDialog(QDialog):
         auto_sync_box.addWidget(self.btn_auto_sync_off)
         auto_sync_box.addStretch()
 
-        form_layout.addWidget(self.lbl_auto_sync, 7, 0)
-        form_layout.addLayout(auto_sync_box, 7, 1)
+        form_layout.addWidget(self.lbl_auto_sync, 8, 0)
+        form_layout.addLayout(auto_sync_box, 8, 1)
 
         # 8. Auto-Send Customer SMS
         self.lbl_sms_toggle = QLabel("Auto SMS Receipts:")
@@ -218,8 +268,8 @@ class SettingsDialog(QDialog):
         sms_btn_box.addWidget(self.btn_sms_off)
         sms_btn_box.addStretch()
 
-        form_layout.addWidget(self.lbl_sms_toggle, 8, 0)
-        form_layout.addLayout(sms_btn_box, 8, 1)
+        form_layout.addWidget(self.lbl_sms_toggle, 9, 0)
+        form_layout.addLayout(sms_btn_box, 9, 1)
 
         # 9. SMS Quick Test Tool
         self.lbl_sms_test = QLabel("Test SMS Gateway:")
@@ -238,8 +288,8 @@ class SettingsDialog(QDialog):
         test_sms_box.addWidget(self.txt_test_phone)
         test_sms_box.addWidget(self.btn_send_test_sms)
 
-        form_layout.addWidget(self.lbl_sms_test, 9, 0)
-        form_layout.addLayout(test_sms_box, 9, 1)
+        form_layout.addWidget(self.lbl_sms_test, 10, 0)
+        form_layout.addLayout(test_sms_box, 10, 1)
 
         layout.addWidget(self.form_frame)
 
@@ -265,7 +315,12 @@ class SettingsDialog(QDialog):
         self.btn_test.clicked.connect(self.run_connection_test)
         tools_row.addWidget(self.btn_test)
 
-        self.btn_designer = QPushButton("🖨️ Receipt & Printer Designer...")
+        self.btn_sync_users = QPushButton("👥 Sync Staff Users Now")
+        self.btn_sync_users.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sync_users.clicked.connect(self.run_users_sync)
+        tools_row.addWidget(self.btn_sync_users)
+
+        self.btn_designer = QPushButton("🖨️ Receipt Designer...")
         self.btn_designer.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_designer.clicked.connect(self.open_designer)
         tools_row.addWidget(self.btn_designer)
@@ -295,6 +350,24 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(self.btn_save)
 
         layout.addLayout(btn_layout)
+
+    def on_preset_changed(self, index: int):
+        presets = {
+            1: {"url": "http://127.0.0.1:8000", "mask": "Jaffna Gold", "name": "Jaffna Gold"},
+            2: {"url": "http://127.0.0.1:8001", "mask": "Plus Store", "name": "Plus Store"},
+            3: {"url": "http://127.0.0.1:8002", "mask": "Thihariya Tiles", "name": "Thihariya Tiles"},
+            4: {"url": "http://127.0.0.1:8003", "mask": "DLB Lottery", "name": "DLB"},
+            5: {"url": "http://127.0.0.1:8004", "mask": "RNZ System", "name": "RNZ"},
+            6: {"url": "http://127.0.0.1:8005", "mask": "Vavuniya Jaffna Gold", "name": "Vav Jaffna Gold"},
+            7: {"url": "https://jaffnagold.com", "mask": "Jaffna Gold", "name": "Jaffna Gold Cloud"},
+        }
+        if index in presets:
+            item = presets[index]
+            self.txt_tenant.setText(item["url"])
+            self.txt_sms_sender.setText(item["mask"])
+            t = get_theme_tokens(self.current_theme)
+            self.lbl_test_status.setText(f"💡 Selected preset: {item['name']} ({item['url']})")
+            self.lbl_test_status.setStyleSheet(f"color: {t['accent']}; font-size: 12px;")
 
     def set_local_server_url(self):
         self.txt_tenant.setText("http://127.0.0.1:8000")
@@ -385,6 +458,28 @@ class SettingsDialog(QDialog):
                 }
             """)
 
+        # Preset Selector Style
+        self.cmb_preset.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {t['input_bg']};
+                color: {t['text_primary']};
+                border: 1px solid {t['border']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {t['bg_card']};
+                color: {t['text_primary']};
+                selection-background-color: {t['accent']};
+                selection-color: {'#0f172a' if mode == 'dark' else '#ffffff'};
+            }}
+        """)
+
         # Local Helper Button
         self.btn_use_local.setStyleSheet(f"""
             QPushButton {{
@@ -423,7 +518,24 @@ class SettingsDialog(QDialog):
                 border-radius: 6px;
                 padding: 10px;
                 font-weight: 600;
-                font-size: 13px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {t['accent']};
+                color: {'#0f172a' if mode == 'dark' else '#ffffff'};
+            }}
+        """)
+
+        # Sync Users Button
+        self.btn_sync_users.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t['btn_default_bg']};
+                color: {t['accent']};
+                border: 1px solid {t['accent']};
+                border-radius: 6px;
+                padding: 10px;
+                font-weight: 600;
+                font-size: 12px;
             }}
             QPushButton:hover {{
                 background-color: {t['accent']};
@@ -703,6 +815,26 @@ class SettingsDialog(QDialog):
         self.set_auto_sync_enabled(self.auto_sync_enabled)
         self.auto_sms_enabled = settings.get("auto_sms_enabled", "1")
         self.set_sms_enabled(self.auto_sms_enabled)
+
+        # Match preset
+        cur = self.original_tenant.rstrip("/")
+        if "127.0.0.1:8000" in cur:
+            self.cmb_preset.setCurrentIndex(1)
+        elif "127.0.0.1:8001" in cur:
+            self.cmb_preset.setCurrentIndex(2)
+        elif "127.0.0.1:8002" in cur:
+            self.cmb_preset.setCurrentIndex(3)
+        elif "127.0.0.1:8003" in cur:
+            self.cmb_preset.setCurrentIndex(4)
+        elif "127.0.0.1:8004" in cur:
+            self.cmb_preset.setCurrentIndex(5)
+        elif "127.0.0.1:8005" in cur:
+            self.cmb_preset.setCurrentIndex(6)
+        elif "jaffnagold.com" in cur:
+            self.cmb_preset.setCurrentIndex(7)
+        else:
+            self.cmb_preset.setCurrentIndex(0)
+
         self.update_url_preview()
 
     def update_url_preview(self):
@@ -769,6 +901,45 @@ class SettingsDialog(QDialog):
             if "jaffnagold.com" in self.txt_tenant.text() or "Could not resolve" in msg:
                 msg += "\n💡 Tip: Your Laravel server is running locally on http://127.0.0.1:8000. Click 'Use Local Laravel' above!"
             self.lbl_test_status.setText(f"✕ {msg}")
+            self.lbl_test_status.setStyleSheet(f"color: {t['danger']}; font-size: 12px; font-weight: bold;")
+
+    def run_users_sync(self):
+        tenant = self.txt_tenant.text().strip()
+        base = self.txt_base.text().strip()
+        token = self.txt_token.text().strip()
+        terminal = self.txt_terminal.text().strip() or "POS-01"
+
+        if not tenant:
+            QMessageBox.warning(self, "Validation", "Please specify a server URL first.")
+            return
+
+        t = get_theme_tokens(self.current_theme)
+        self.btn_sync_users.setEnabled(False)
+        self.progress_bar.show()
+        self.lbl_test_status.setText("Syncing staff & cashier users from server...")
+        self.lbl_test_status.setStyleSheet(f"color: {t['warning']}; font-size: 12px;")
+
+        self.users_worker = SyncUsersWorker(self.db, tenant, base, token, terminal)
+        self.users_worker.finished.connect(self.on_users_sync_finished)
+        self.users_worker.start()
+
+    def on_users_sync_finished(self, result: dict):
+        self.btn_sync_users.setEnabled(True)
+        self.progress_bar.hide()
+        t = get_theme_tokens(self.current_theme)
+        if result.get("success"):
+            count = result.get("count", 0)
+            self.lbl_test_status.setText(f"✓ {result.get('message')}")
+            self.lbl_test_status.setStyleSheet(f"color: {t['success']}; font-size: 12px; font-weight: bold;")
+            if self.sync_worker:
+                self.sync_worker.users_synced.emit(count)
+            QMessageBox.information(
+                self,
+                "Staff Users Synced",
+                f"Successfully downloaded {count} staff/cashier users from backend server!\n\nYou can select the active cashier via [Ctrl+U] or the top bar."
+            )
+        else:
+            self.lbl_test_status.setText(f"✕ {result.get('message')}")
             self.lbl_test_status.setStyleSheet(f"color: {t['danger']}; font-size: 12px; font-weight: bold;")
 
     def save_settings(self):

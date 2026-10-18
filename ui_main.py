@@ -48,6 +48,9 @@ class CheckoutDialog(QDialog):
         self.customer_phone = customer_phone or ""
         self.auto_sms_enabled = auto_sms_enabled
         self.send_sms = False
+        self.cheque_no = ""
+        self.bank_name = ""
+        self.cheque_date = datetime.now().strftime("%Y-%m-%d")
 
         self.setWindowTitle("Checkout & Payment (F5)")
         self.resize(580, 780)
@@ -256,9 +259,10 @@ class CheckoutDialog(QDialog):
         self.btn_cash = QPushButton("💵 CASH")
         self.btn_card = QPushButton("💳 CARD")
         self.btn_transfer = QPushButton("🏦 TRANSFER")
+        self.btn_cheque = QPushButton("📜 CHEQUE")
 
-        self.methods = ["CASH", "CARD", "TRANSFER"]
-        self.method_buttons = [self.btn_cash, self.btn_card, self.btn_transfer]
+        self.methods = ["CASH", "CARD", "TRANSFER", "CHEQUE"]
+        self.method_buttons = [self.btn_cash, self.btn_card, self.btn_transfer, self.btn_cheque]
 
         for b in self.method_buttons:
             b.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -312,6 +316,7 @@ class CheckoutDialog(QDialog):
         self.btn_cash.clicked.connect(lambda: self.set_method("CASH"))
         self.btn_card.clicked.connect(lambda: self.set_method("CARD"))
         self.btn_transfer.clicked.connect(lambda: self.set_method("TRANSFER"))
+        self.btn_cheque.clicked.connect(lambda: self.set_method("CHEQUE"))
 
         single_vbox.addLayout(method_layout)
 
@@ -352,6 +357,62 @@ class CheckoutDialog(QDialog):
         form_layout.addWidget(self.lbl_change_val, 2, 1)
 
         single_vbox.addLayout(form_layout)
+
+        # Cheque Details Form Card (visible only when CHEQUE method selected)
+        self.cheque_frame = QFrame()
+        self.cheque_frame.setObjectName("checkoutChequeCard")
+        self.cheque_frame.setStyleSheet(f"""
+            #checkoutChequeCard {{
+                background-color: {t['bg_card_inner']};
+                border: 1.5px solid #f59e0b;
+                border-radius: 8px;
+                padding: 6px 12px;
+            }}
+            #checkoutChequeCard QLabel {{
+                background: transparent;
+                border: none;
+                font-size: 11px;
+                font-weight: 600;
+                color: {t['text_primary']};
+            }}
+        """)
+        ch_layout = QGridLayout(self.cheque_frame)
+        ch_layout.setContentsMargins(6, 6, 6, 6)
+        ch_layout.setSpacing(6)
+
+        lbl_chq_title = QLabel("📜 CHEQUE PAYMENT DETAILS")
+        lbl_chq_title.setStyleSheet("color: #f59e0b; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;")
+        ch_layout.addWidget(lbl_chq_title, 0, 0, 1, 2)
+
+        lbl_cno = QLabel("Cheque Number:")
+        self.txt_cheque_no = QLineEdit()
+        self.txt_cheque_no.setPlaceholderText("e.g. 123456")
+        self.txt_cheque_no.setFixedHeight(30)
+        self.txt_cheque_no.setStyleSheet(f"background-color: {t['bg_input']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 5px; padding: 2px 6px;")
+        self.txt_cheque_no.installEventFilter(self)
+        ch_layout.addWidget(lbl_cno, 1, 0)
+        ch_layout.addWidget(self.txt_cheque_no, 1, 1)
+
+        lbl_cbank = QLabel("Bank Name:")
+        self.txt_bank_name = QLineEdit()
+        self.txt_bank_name.setPlaceholderText("e.g. Commercial Bank, BOC, Sampath")
+        self.txt_bank_name.setFixedHeight(30)
+        self.txt_bank_name.setStyleSheet(f"background-color: {t['bg_input']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 5px; padding: 2px 6px;")
+        self.txt_bank_name.installEventFilter(self)
+        ch_layout.addWidget(lbl_cbank, 2, 0)
+        ch_layout.addWidget(self.txt_bank_name, 2, 1)
+
+        lbl_cdate = QLabel("Cheque Date:")
+        self.txt_cheque_date = QLineEdit(datetime.now().strftime("%Y-%m-%d"))
+        self.txt_cheque_date.setPlaceholderText("YYYY-MM-DD")
+        self.txt_cheque_date.setFixedHeight(30)
+        self.txt_cheque_date.setStyleSheet(f"background-color: {t['bg_input']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 5px; padding: 2px 6px;")
+        self.txt_cheque_date.installEventFilter(self)
+        ch_layout.addWidget(lbl_cdate, 3, 0)
+        ch_layout.addWidget(self.txt_cheque_date, 3, 1)
+
+        self.cheque_frame.setVisible(False)
+        single_vbox.addWidget(self.cheque_frame)
         layout.addWidget(self.container_single)
 
         # --- Container 2: Multi Payment (Split) ---
@@ -932,6 +993,34 @@ class CheckoutDialog(QDialog):
                     self.txt_multi_cash.selectAll()
                     return True
 
+            # When user is on Cheque fields
+            elif hasattr(self, 'txt_cheque_no') and watched == self.txt_cheque_no:
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
+                    self.txt_bank_name.setFocus()
+                    self.txt_bank_name.selectAll()
+                    return True
+                elif key == Qt.Key.Key_Up:
+                    self.txt_paid.setFocus()
+                    self.txt_paid.selectAll()
+                    return True
+            elif hasattr(self, 'txt_bank_name') and watched == self.txt_bank_name:
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
+                    self.txt_cheque_date.setFocus()
+                    self.txt_cheque_date.selectAll()
+                    return True
+                elif key == Qt.Key.Key_Up:
+                    self.txt_cheque_no.setFocus()
+                    self.txt_cheque_no.selectAll()
+                    return True
+            elif hasattr(self, 'txt_cheque_date') and watched == self.txt_cheque_date:
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    self.confirm_payment()
+                    return True
+                elif key == Qt.Key.Key_Up:
+                    self.txt_bank_name.setFocus()
+                    self.txt_bank_name.selectAll()
+                    return True
+
         return super().eventFilter(watched, event)
 
     def _refresh_quick_buttons(self):
@@ -1027,6 +1116,12 @@ class CheckoutDialog(QDialog):
         self.btn_cash.setChecked(method == "CASH")
         self.btn_card.setChecked(method == "CARD")
         self.btn_transfer.setChecked(method == "TRANSFER")
+        self.btn_cheque.setChecked(method == "CHEQUE")
+        if hasattr(self, 'cheque_frame'):
+            self.cheque_frame.setVisible(method == "CHEQUE")
+            if method == "CHEQUE":
+                self.txt_cheque_no.setFocus()
+                self.txt_cheque_no.selectAll()
         self._refresh_quick_buttons()
         self.calculate_change()
 
@@ -1086,6 +1181,24 @@ class CheckoutDialog(QDialog):
         else:
             self.calculate_change()
             self.split_payments = None
+
+        if self.payment_method == "CHEQUE":
+            ch_no = self.txt_cheque_no.text().strip()
+            if not ch_no:
+                QMessageBox.warning(
+                    self,
+                    "Cheque Number Required",
+                    "Please enter the Cheque Number before completing payment."
+                )
+                self.txt_cheque_no.setFocus()
+                return
+            self.cheque_no = ch_no
+            self.bank_name = self.txt_bank_name.text().strip()
+            self.cheque_date = self.txt_cheque_date.text().strip() or datetime.now().strftime("%Y-%m-%d")
+        else:
+            self.cheque_no = ""
+            self.bank_name = ""
+            self.cheque_date = ""
 
         cust_name = self.txt_cust_name.text().strip()
         if self.due_amount > 0:
@@ -1158,6 +1271,258 @@ class CheckoutDialog(QDialog):
                         self.txt_discount.setFocus()
                         self.txt_discount.selectAll()
                 return
+        super().keyPressEvent(event)
+
+
+class StaffSelectDialog(QDialog):
+    """
+    Dialog allowing cashier to search and pick their active user account.
+    Displays synced users from API (admin, shop-staff, delivery man).
+    """
+    def __init__(self, db: DatabaseManager, sync_worker=None, theme_mode: str = "dark", parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.sync_worker = sync_worker
+        self.theme_mode = theme_mode or "dark"
+        self.selected_user = None
+        self.all_users = []
+        self.filtered_users = []
+
+        self.setWindowTitle("Select Active Cashier / Staff (Ctrl+U)")
+        self.setMinimumSize(560, 480)
+        self.resize(580, 520)
+        self.setModal(True)
+        self.init_ui()
+        self.load_users()
+
+    def init_ui(self):
+        t = get_theme_tokens(self.theme_mode)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # Header
+        h_box = QHBoxLayout()
+        lbl_title = QLabel("👤 Select Active Cashier / Staff User")
+        lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {t['text_heading']};")
+        h_box.addWidget(lbl_title)
+        h_box.addStretch()
+
+        self.btn_sync_api = QPushButton("🔄 Sync Users from API")
+        self.btn_sync_api.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sync_api.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t['btn_default_bg']};
+                color: {t['accent']};
+                border: 1px solid {t['border']};
+                border-radius: 5px;
+                padding: 4px 10px;
+                font-weight: 600;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: {t['border']};
+            }}
+        """)
+        self.btn_sync_api.clicked.connect(self._sync_users_now)
+        h_box.addWidget(self.btn_sync_api)
+        layout.addLayout(h_box)
+
+        lbl_desc = QLabel("Bills and sales will be attributed to the selected user on the system.")
+        lbl_desc.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px;")
+        layout.addWidget(lbl_desc)
+
+        # Search Bar
+        self.txt_search = QLineEdit()
+        self.txt_search.setPlaceholderText("🔍 Search staff by name, role (admin, shop-staff, delivery man), or email...")
+        self.txt_search.setFixedHeight(34)
+        self.txt_search.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {t['bg_input']};
+                color: {t['text_primary']};
+                border: 1px solid {t['border']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: {t['accent']};
+            }}
+        """)
+        self.txt_search.textChanged.connect(self._apply_filter)
+        layout.addWidget(self.txt_search)
+
+        # Users Table
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["ID", "Name", "Role", "Email"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {t['bg_card']};
+                alternate-background-color: {t['bg_card_inner']};
+                border: 1px solid {t['border']};
+                border-radius: 6px;
+                color: {t['text_primary']};
+                font-size: 12px;
+            }}
+            QTableWidget::item:selected {{
+                background-color: {t['accent']};
+                color: #ffffff;
+            }}
+            QHeaderView::section {{
+                background-color: {t['table_header_bg']};
+                color: {t['table_header_text']};
+                font-weight: bold;
+                padding: 6px;
+                border: none;
+                border-bottom: 1px solid {t['border']};
+            }}
+        """)
+        hdr = self.table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(2, 120)
+        self.table.itemDoubleClicked.connect(self._on_item_double_clicked)
+        layout.addWidget(self.table)
+
+        # Status / Feedback label
+        self.lbl_status = QLabel("")
+        self.lbl_status.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px;")
+        layout.addWidget(self.lbl_status)
+
+        # Buttons
+        btn_box = QHBoxLayout()
+        self.btn_cancel = QPushButton("Cancel (Esc)")
+        self.btn_cancel.setFixedHeight(36)
+        self.btn_cancel.setStyleSheet(f"background-color: {t['btn_default_bg']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 6px; padding: 6px 14px;")
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(self.btn_cancel)
+
+        btn_box.addStretch()
+
+        self.btn_select = QPushButton("✓ Select & Activate User [Enter]")
+        self.btn_select.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_select.setFixedHeight(36)
+        self.btn_select.setStyleSheet(f"background-color: {t['success']}; color: #ffffff; font-weight: bold; border-radius: 6px; padding: 6px 20px; border: none;")
+        self.btn_select.clicked.connect(self._confirm_selection)
+        btn_box.addWidget(self.btn_select)
+        layout.addLayout(btn_box)
+
+    def load_users(self):
+        self.all_users = self.db.get_all_users()
+        if not self.all_users and self.sync_worker and self.sync_worker.is_online:
+            self._sync_users_now()
+            self.all_users = self.db.get_all_users()
+        self._apply_filter(self.txt_search.text())
+
+    def _apply_filter(self, query: str = ""):
+        q = query.strip().lower()
+        if not q:
+            self.filtered_users = list(self.all_users)
+        else:
+            self.filtered_users = [
+                u for u in self.all_users
+                if q in str(u.get("name", "")).lower()
+                or q in str(u.get("role", "")).lower()
+                or q in str(u.get("email", "")).lower()
+                or q in str(u.get("id", ""))
+            ]
+        self._render_table()
+
+    def _render_table(self):
+        self.table.setRowCount(0)
+        active_u = self.db.get_active_cashier_user()
+        active_id = active_u.get("id")
+
+        for u in self.filtered_users:
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+
+            # Col 0: ID
+            it_id = QTableWidgetItem(str(u.get("id", "")))
+            it_id.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            it_id.setData(Qt.ItemDataRole.UserRole, u)
+            self.table.setItem(r, 0, it_id)
+
+            # Col 1: Name
+            uname = u.get("name", "")
+            is_active = (u.get("id") == active_id)
+            name_text = f"★ {uname} (Active)" if is_active else uname
+            it_name = QTableWidgetItem(name_text)
+            f = it_name.font()
+            f.setBold(True)
+            it_name.setFont(f)
+            self.table.setItem(r, 1, it_name)
+
+            # Col 2: Role
+            role = str(u.get("role", "staff")).replace("_", "-")
+            it_role = QTableWidgetItem(role)
+            it_role.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if "admin" in role.lower():
+                it_role.setForeground(QColor("#a855f7"))
+            elif "delivery" in role.lower():
+                it_role.setForeground(QColor("#f59e0b"))
+            else:
+                it_role.setForeground(QColor("#38bdf8"))
+            self.table.setItem(r, 2, it_role)
+
+            # Col 3: Email
+            it_email = QTableWidgetItem(u.get("email") or "—")
+            self.table.setItem(r, 3, it_email)
+
+            if is_active:
+                self.table.selectRow(r)
+
+        if self.table.rowCount() > 0 and self.table.currentRow() < 0:
+            self.table.selectRow(0)
+
+    def _sync_users_now(self):
+        settings = self.db.get_all_settings()
+        tenant = settings.get("tenant_subdomain", "dbl")
+        base_domain = settings.get("base_domain", "webxkey.lk")
+        token = settings.get("api_token", "")
+        terminal = settings.get("terminal_id", "POS-01")
+
+        if self.sync_worker:
+            base_url = self.sync_worker.build_base_url(tenant, base_domain)
+            headers = self.sync_worker.get_headers(token, terminal)
+            count = self.sync_worker.sync_users(base_url, headers)
+            self.lbl_status.setText(f"✓ Synced {count} staff users from API ({base_url})")
+            self.all_users = self.db.get_all_users()
+            self._apply_filter(self.txt_search.text())
+        else:
+            self.lbl_status.setText("⚠️ Sync worker unavailable.")
+
+    def _confirm_selection(self):
+        cur_row = self.table.currentRow()
+        if cur_row < 0:
+            QMessageBox.warning(self, "Select Cashier", "Please select a staff member from the list.")
+            return
+        it = self.table.item(cur_row, 0)
+        if it:
+            u = it.data(Qt.ItemDataRole.UserRole)
+            if u:
+                self.selected_user = u
+                self.db.set_active_cashier_user(u["id"], u["name"], u.get("role", "staff"))
+                self.accept()
+
+    def _on_item_double_clicked(self, item):
+        self._confirm_selection()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._confirm_selection()
+            return
+        elif event.key() == Qt.Key.Key_Escape:
+            self.reject()
+            return
         super().keyPressEvent(event)
 
 
@@ -1958,10 +2323,32 @@ class MainWindow(QMainWindow):
         self.lbl_datetime = QLabel(datetime.now().strftime("Date: %d-%b-%Y  %H:%M:%S"))
         layout.addWidget(self.lbl_datetime)
 
-        # Cashier Name
-        cashier = self.db.get_setting("cashier_name", "Admin")
-        self.lbl_cashier = QLabel(f"Cashier: {cashier}")
-        layout.addWidget(self.lbl_cashier)
+        # Cashier Selector [Ctrl+U]
+        t = get_theme_tokens(self.current_theme)
+        active_u = self.db.get_active_cashier_user()
+        self.current_cashier_id = active_u.get("id", 1)
+        self.current_cashier_name = active_u.get("name") or self.db.get_setting("cashier_name", "Admin")
+        self.current_cashier_role = active_u.get("role", "admin")
+        self.btn_cashier = QPushButton(f"👤 {self.current_cashier_name} [{self.current_cashier_role}] (Ctrl+U)")
+        self.btn_cashier.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cashier.setToolTip("Click or press [Ctrl+U] to switch active Cashier / Staff user")
+        self.btn_cashier.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {t['text_heading']};
+                font-weight: bold;
+                font-size: 13px;
+                border: 1px dashed {t['border']};
+                border-radius: 6px;
+                padding: 4px 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {t['btn_default_bg']};
+                border-color: {t['accent']};
+            }}
+        """)
+        self.btn_cashier.clicked.connect(self.prompt_cashier_select)
+        layout.addWidget(self.btn_cashier)
 
         layout.addStretch()
 
@@ -2545,7 +2932,7 @@ class MainWindow(QMainWindow):
 
     # --- Payment Toggle ---
     def toggle_payment_method(self):
-        methods = ["CASH", "CARD", "TRANSFER"]
+        methods = ["CASH", "CARD", "TRANSFER", "CHEQUE"]
         idx = methods.index(self.current_payment_method) if self.current_payment_method in methods else 0
         self.current_payment_method = methods[(idx + 1) % len(methods)]
         self.btn_pay_toggle.setText(f"Payment: {self.current_payment_method} (F9)")
@@ -2648,6 +3035,19 @@ class MainWindow(QMainWindow):
                 self.tabs[self.active_tab_idx].customer_name = cname
                 self.tabs[self.active_tab_idx].customer_phone = cphone
                 self._update_tab_summary_labels()
+
+    # --- Cashier / Staff Selection [Ctrl+U] ---
+    def prompt_cashier_select(self):
+        """Opens staff selector to switch the active cashier and attribute sales."""
+        dlg = StaffSelectDialog(self.db, sync_worker=self.sync_worker, theme_mode=self.current_theme, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_user:
+            u = dlg.selected_user
+            self.current_cashier_id = u["id"]
+            self.current_cashier_name = u["name"]
+            self.current_cashier_role = u.get("role", "staff")
+            if hasattr(self, 'btn_cashier'):
+                self.btn_cashier.setText(f"👤 {u['name']} [{self.current_cashier_role}] (Ctrl+U)")
+            self.show_status_bar_message(f"👤 Active Cashier set to: {u['name']} ({self.current_cashier_role})")
 
     # --- Bill Management Actions ---
     def new_bill(self):
@@ -2782,8 +3182,12 @@ class MainWindow(QMainWindow):
             initial_synced = 0 # Saved locally first; worker will push if online
 
             extra_disc = getattr(checkout_dlg, 'extra_discount', Decimal('0.00'))
-            final_grand_total = checkout_dlg.grand_total
-            final_total_discount = self.discount_total + extra_disc
+            active_u = self.db.get_active_cashier_user()
+            user_id = active_u.get("id") or getattr(self, "current_cashier_id", 1)
+            cashier_name = active_u.get("name") or getattr(self, "current_cashier_name", "Admin")
+            cheque_no = getattr(checkout_dlg, 'cheque_no', '')
+            bank_name = getattr(checkout_dlg, 'bank_name', '')
+            cheque_date = getattr(checkout_dlg, 'cheque_date', '')
 
             invoice_record = {
                 "bill_no": self.current_bill_no,
@@ -2800,7 +3204,12 @@ class MainWindow(QMainWindow):
                 "items": items,
                 "items_json": items,
                 "created_at": now_str,
-                "sms_sent": 0
+                "sms_sent": 0,
+                "user_id": user_id,
+                "cashier_name": cashier_name,
+                "cheque_no": cheque_no,
+                "bank_name": bank_name,
+                "cheque_date": cheque_date
             }
 
             # Save in SQLite (0ms UI lag)
@@ -2945,7 +3354,8 @@ class MainWindow(QMainWindow):
             "• <b>[F6]:</b> Today's Sales List (Reprint Receipt & Edit Bill)<br>"
             "• <b>[F7]:</b> Delete / Void focused row<br>"
             "• <b>[F8]:</b> Select / Change Customer<br>"
-            "• <b>[F9]:</b> Toggle Payment Method (Cash/Card/Transfer)<br>"
+            "• <b>[Ctrl+U]:</b> Switch Active Cashier / Staff User<br>"
+            "• <b>[F9]:</b> Toggle Payment Method (Cash / Card / Transfer / Cheque)<br>"
             "• <b>[F10]:</b> Manual Cloud Sync<br>"
             "• <b>[F12]:</b> System & Multi-Tenant Settings<br>"
         )
@@ -2959,13 +3369,16 @@ class MainWindow(QMainWindow):
         key = event.key()
         modifiers = event.modifiers()
 
-        # Multi-Bill Tab Hotkeys: Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+Shift+Tab
+        # Multi-Bill Tab Hotkeys: Ctrl+T, Ctrl+W, Ctrl+U, Ctrl+Tab, Ctrl+Shift+Tab
         if modifiers & Qt.KeyboardModifier.ControlModifier:
             if key == Qt.Key.Key_T:
                 self.add_new_bill_tab()
                 return
             elif key == Qt.Key.Key_W:
                 self.close_bill_tab(self.active_tab_idx)
+                return
+            elif key == Qt.Key.Key_U:
+                self.prompt_cashier_select()
                 return
             elif key == Qt.Key.Key_Tab:
                 if modifiers & Qt.KeyboardModifier.ShiftModifier:

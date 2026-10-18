@@ -23,6 +23,8 @@ class SyncWorker(QThread):
     status_changed = pyqtSignal(bool, int, str)
     # product_sync_completed(count: int, message: str)
     product_sync_completed = pyqtSignal(int, str)
+    # users_synced(count: int, message: str)
+    users_synced = pyqtSignal(int, str)
     # invoice_pushed(bill_no: str, success: bool, message: str)
     invoice_pushed = pyqtSignal(str, bool, str)
     # sales_synced(count: int, total_amount: float, message: str)
@@ -39,6 +41,7 @@ class SyncWorker(QThread):
         self._cond = QWaitCondition()
         self._trigger_now = False
         self._sync_products_requested = False
+        self._sync_users_requested = False
         self._pull_sales_requested = False
         self.is_online = False
 
@@ -50,12 +53,22 @@ class SyncWorker(QThread):
         self._mutex.unlock()
         self.wait(2000)
 
-    def request_immediate_sync(self, sync_products: bool = False):
+    def request_immediate_sync(self, sync_products: bool = False, sync_users: bool = False):
         """Wake up the worker immediately for an urgent sync or heartbeat check."""
         self._mutex.lock()
         self._trigger_now = True
         if sync_products:
             self._sync_products_requested = True
+        if sync_users:
+            self._sync_users_requested = True
+        self._cond.wakeAll()
+        self._mutex.unlock()
+
+    def request_users_sync(self):
+        """Wake up worker to immediately pull staff users from cloud."""
+        self._mutex.lock()
+        self._trigger_now = True
+        self._sync_users_requested = True
         self._cond.wakeAll()
         self._mutex.unlock()
 
@@ -164,7 +177,12 @@ class SyncWorker(QThread):
                 "payment_method": inv["payment_method"],
                 "split_payments": split_data,
                 "items": inv.get("items", []),
-                "billed_at": inv["created_at"]
+                "billed_at": inv["created_at"],
+                "user_id": inv.get("user_id"),
+                "cashier_name": inv.get("cashier_name"),
+                "cheque_no": inv.get("cheque_no"),
+                "bank_name": inv.get("bank_name"),
+                "cheque_date": inv.get("cheque_date")
             })
 
         endpoints = [
@@ -187,6 +205,33 @@ class SyncWorker(QThread):
                 continue
 
         return (0, [])
+
+    def sync_users(self, base_url: str, headers: Dict[str, str]) -> int:
+        """Pulls active staff/cashier users from cloud and upserts into SQLite."""
+        alt_base = base_url.replace("/api/v1", "/api") if "/api/v1" in base_url else base_url
+        endpoints = [
+            f"{base_url}/pos/users",
+            f"{base_url}/users",
+            f"{alt_base}/pos/users",
+            f"{alt_base}/users"
+        ]
+        for ep in endpoints:
+            try:
+                resp = requests.get(ep, headers=headers, timeout=6.0, verify=False)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    users = []
+                    if isinstance(data, list):
+                        users = data
+                    elif isinstance(data, dict):
+                        users = data.get("users") or data.get("data") or []
+                    if users and self.db:
+                        count = self.db.upsert_users(users)
+                        return count
+            except requests.RequestException as e:
+                print(f"[SyncWorker] Users pull error at {ep}: {e}")
+                continue
+        return 0
 
     def sync_product_catalog(self, base_url: str, headers: Dict[str, str]) -> int:
         """Pulls updated products from cloud and upserts into SQLite."""
@@ -441,7 +486,12 @@ class SyncWorker(QThread):
                             "items": items,
                             "created_at": parse_iso(s.get("created_at")),
                             "is_synced": 1,
-                            "sms_sent": 1 if cust_phone else 0
+                            "sms_sent": 1 if cust_phone else 0,
+                            "user_id": s.get("user_id"),
+                            "cashier_name": s.get("cashier_name") or (s.get("user") or {}).get("name"),
+                            "cheque_no": s.get("cheque_no"),
+                            "bank_name": s.get("bank_name"),
+                            "cheque_date": s.get("cheque_date")
                         }
                         self.db.upsert_synced_invoice(inv_record)
                         total_upserted += 1
@@ -473,7 +523,7 @@ class SyncWorker(QThread):
             pending_count = self.db.get_pending_invoice_count()
 
             # If auto-sync is OFF, only sync if user explicitly triggered it
-            should_sync = auto_sync or self._trigger_now or self._sync_products_requested or self._pull_sales_requested
+            should_sync = auto_sync or self._trigger_now or self._sync_products_requested or self._sync_users_requested or self._pull_sales_requested
 
             if online:
                 # Push pending invoices
@@ -482,6 +532,14 @@ class SyncWorker(QThread):
                     pending_count = self.db.get_pending_invoice_count()
                     for bill in synced_bills:
                         self.invoice_pushed.emit(bill, True, "Synced to cloud")
+
+                # Auto-sync staff users if empty or explicitly requested
+                current_user_count = self.db.get_user_count()
+                if self._sync_users_requested or (auto_sync and current_user_count == 0):
+                    self._sync_users_requested = False
+                    u_count = self.sync_users(base_url, headers)
+                    if u_count > 0:
+                        self.users_synced.emit(u_count, f"Synced {u_count} staff users from cloud")
 
                 # Auto-sync product catalog if database has fewer than 50 items or if explicitly requested
                 current_prod_count = self.db.get_product_count()
