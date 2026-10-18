@@ -2000,8 +2000,22 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'lbl_datetime'):
             self.lbl_datetime.setStyleSheet(f"font-size: 13px; color: {t['text_secondary']};")
 
-        if hasattr(self, 'lbl_cashier'):
-            self.lbl_cashier.setStyleSheet(f"font-size: 13px; color: {t['text_secondary']};")
+        if hasattr(self, 'btn_cashier'):
+            self.btn_cashier.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {t['text_heading']};
+                    font-weight: bold;
+                    font-size: 13px;
+                    border: 1px dashed {t['border']};
+                    border-radius: 6px;
+                    padding: 4px 10px;
+                }}
+                QPushButton:hover {{
+                    background-color: {t['btn_default_bg']};
+                    border-color: {t['accent']};
+                }}
+            """)
 
         if hasattr(self, 'btn_customer'):
             self.btn_customer.setStyleSheet(f"""
@@ -2331,6 +2345,7 @@ class MainWindow(QMainWindow):
         self.current_cashier_name = active_u.get("name") or self.db.get_setting("cashier_name", "Admin")
         self.current_cashier_role = active_u.get("role", "admin")
         self.btn_cashier = QPushButton(f"👤 {self.current_cashier_name} [{self.current_cashier_role}] (Ctrl+U)")
+        self.lbl_cashier = self.btn_cashier
         self.btn_cashier.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cashier.setToolTip("Click or press [Ctrl+U] to switch active Cashier / Staff user")
         self.btn_cashier.setStyleSheet(f"""
@@ -3315,7 +3330,11 @@ class MainWindow(QMainWindow):
 
     def _on_settings_saved(self):
         cashier = self.db.get_setting("cashier_name", "Admin")
-        self.lbl_cashier.setText(f"Cashier: {cashier}")
+        role = self.db.get_setting("cashier_role", "admin")
+        self.current_cashier_name = cashier
+        self.current_cashier_role = role
+        if hasattr(self, 'btn_cashier') and self.btn_cashier:
+            self.btn_cashier.setText(f"👤 {cashier} [{role}] (Ctrl+U)")
         self.show_status_bar_message("Settings saved.")
 
     def _on_database_cleared(self):
