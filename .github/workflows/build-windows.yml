@@ -8,6 +8,8 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout Repository
@@ -63,3 +65,22 @@ jobs:
         name: FastPOS-Windows-Portable-EXE
         path: dist_portable/FastPOS_Portable.exe
         retention-days: 30
+
+    - name: Publish Direct .EXE to GitHub Releases
+      uses: softprops/action-gh-release@v2
+      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+      with:
+        tag_name: v1.0.0
+        name: "FastPOS Desktop Terminal v1.0.0 (Windows Builds)"
+        body: |
+          ### 🚀 FastPOS Premium Desktop Terminal v1.0.0
+          High-performance multi-tenant desktop terminal with offline SQLite caching and cloud sync.
+
+          #### 📥 Windows Downloads:
+          - **[FastPOS_Setup_v1.0.exe](https://github.com/MohamedSaman/POSFast/releases/download/v1.0.0/FastPOS_Setup_v1.0.exe)**: Complete Setup Wizard Installer (Recommended).
+          - **[FastPOS_Portable.exe](https://github.com/MohamedSaman/POSFast/releases/download/v1.0.0/FastPOS_Portable.exe)**: Standalone portable single-file executable (no installation required).
+        files: |
+          dist/FastPOS_Setup_v1.0.exe
+          dist_portable/FastPOS_Portable.exe
+        prerelease: false
+
