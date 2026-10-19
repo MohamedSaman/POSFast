@@ -45,6 +45,22 @@ def main():
     # 1. Initialize Database & Seed sample data
     db = DatabaseManager()
 
+    # Log startup configuration
+    from logger import log_step, log_info, log_success, LOG_FILE
+    tenant = db.get_setting("tenant_subdomain", "https://jaffnagold.com")
+    token = db.get_setting("api_token", "")
+    cashier = db.get_setting("cashier_name", "Admin")
+    terminal = db.get_setting("terminal_id", "POS-01")
+    pending = db.get_pending_invoice_count()
+
+    log_step(
+        "FastPOS Desktop Terminal Starting", 
+        f"Server: {tenant} | Terminal: {terminal} | Cashier: {cashier} | Token: {'[Configured]' if token else '[None]'}"
+    )
+    log_info(f"Persistent activity log file: {LOG_FILE}")
+    if pending > 0:
+        log_info(f"Found {pending} offline bill(s) pending sync in SQLite cache.")
+
     # 2. Load and apply saved Theme (Dark or Light)
     current_theme = db.get_setting("theme", "dark")
     apply_theme_to_app(app, current_theme)

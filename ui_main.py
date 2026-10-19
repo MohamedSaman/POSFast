@@ -39,7 +39,8 @@ class CheckoutDialog(QDialog):
         self.payment_mode = "single"  # "single" or "multiple"
         self.split_secondary_method = "online"  # "online" (Card) or "bank_transfer"
         self.split_payments = None
-        self.payment_method = default_method if default_method != "MULTIPLE" else "CASH"
+        raw_pm = str(default_method or "CASH").strip().upper()
+        self.payment_method = "CASH" if raw_pm == "MULTIPLE" else raw_pm
         self.paid_amount = grand_total
         self.due_amount = Decimal('0.00')
         self.change_amount = Decimal('0.00')
@@ -58,6 +59,13 @@ class CheckoutDialog(QDialog):
         self.setMinimumSize(560, 740)
         self.setModal(True)
         self.init_ui()
+
+    def get_current_method_index(self) -> int:
+        cur = str(getattr(self, 'payment_method', 'CASH')).strip().upper()
+        for idx, m in enumerate(getattr(self, 'methods', ["CASH", "CARD", "TRANSFER", "CHEQUE"])):
+            if m.upper() == cur:
+                return idx
+        return 0
 
     def init_ui(self):
         t = get_theme_tokens(self.theme_mode)
@@ -927,7 +935,7 @@ class CheckoutDialog(QDialog):
             if hasattr(self, 'txt_discount') and watched == self.txt_discount:
                 if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down, Qt.Key.Key_Tab):
                     if self.payment_mode == "single":
-                        cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                        cur_idx = self.get_current_method_index()
                         self.method_buttons[cur_idx].setFocus()
                     else:
                         self.txt_multi_cash.setFocus()
@@ -943,13 +951,13 @@ class CheckoutDialog(QDialog):
                         self.txt_discount.selectAll()
                     return True
                 elif key in (Qt.Key.Key_Right, Qt.Key.Key_Tab):
-                    cur_idx = self.methods.index(self.payment_method)
+                    cur_idx = self.get_current_method_index()
                     next_idx = (cur_idx + 1) % len(self.methods)
                     self.set_method(self.methods[next_idx])
                     self.method_buttons[next_idx].setFocus()
                     return True
                 elif key in (Qt.Key.Key_Left, Qt.Key.Key_Backtab):
-                    cur_idx = self.methods.index(self.payment_method)
+                    cur_idx = self.get_current_method_index()
                     prev_idx = (cur_idx - 1) % len(self.methods)
                     self.set_method(self.methods[prev_idx])
                     self.method_buttons[prev_idx].setFocus()
@@ -964,7 +972,7 @@ class CheckoutDialog(QDialog):
             elif watched == self.txt_paid:
                 if key == Qt.Key.Key_Up:
                     # Up Arrow jumps back to Payment Methods
-                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                    cur_idx = self.get_current_method_index()
                     self.method_buttons[cur_idx].setFocus()
                     return True
                 elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -1227,7 +1235,7 @@ class CheckoutDialog(QDialog):
         if hasattr(self, 'txt_discount') and self.txt_discount.hasFocus():
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
                 if self.payment_mode == "single":
-                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                    cur_idx = self.get_current_method_index()
                     self.method_buttons[cur_idx].setFocus()
                 else:
                     self.txt_multi_cash.setFocus()
@@ -1240,13 +1248,13 @@ class CheckoutDialog(QDialog):
                     self.txt_discount.selectAll()
                 return
             elif key in (Qt.Key.Key_Right, Qt.Key.Key_Tab) and self.payment_mode == "single":
-                cur_idx = self.methods.index(self.payment_method)
+                cur_idx = self.get_current_method_index()
                 next_idx = (cur_idx + 1) % len(self.methods)
                 self.set_method(self.methods[next_idx])
                 self.method_buttons[next_idx].setFocus()
                 return
             elif key in (Qt.Key.Key_Left, Qt.Key.Key_Backtab) and self.payment_mode == "single":
-                cur_idx = self.methods.index(self.payment_method)
+                cur_idx = self.get_current_method_index()
                 prev_idx = (cur_idx - 1) % len(self.methods)
                 self.set_method(self.methods[prev_idx])
                 self.method_buttons[prev_idx].setFocus()
@@ -1265,7 +1273,7 @@ class CheckoutDialog(QDialog):
                 return
             elif key == Qt.Key.Key_Up:
                 if self.payment_mode == "single":
-                    cur_idx = self.methods.index(self.payment_method) if self.payment_method in self.methods else 0
+                    cur_idx = self.get_current_method_index()
                     self.method_buttons[cur_idx].setFocus()
                 else:
                     if hasattr(self, 'txt_discount'):
@@ -3360,7 +3368,7 @@ class MainWindow(QMainWindow):
                 bill_no=self.current_bill_no,
                 customer_name=self.current_customer,
                 customer_phone=self.current_customer_phone,
-                payment_method="Cash"
+                payment_method="CASH"
             )
         ]
         self.active_tab_idx = 0

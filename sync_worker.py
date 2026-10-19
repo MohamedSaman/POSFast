@@ -12,6 +12,7 @@ import urllib3
 from typing import Dict, Any, List, Optional, Tuple
 from PyQt6.QtCore import QThread, pyqtSignal, QMutex, QWaitCondition
 from database import DatabaseManager
+from logger import log_step, log_info, log_success, log_warn, log_error
 
 # Suppress SSL certificate verification warnings for subdomains
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -128,14 +129,19 @@ class SyncWorker(QThread):
         ]
         for url in candidate_endpoints:
             try:
+                t0 = time.time()
                 resp = requests.get(url, headers=headers, timeout=3.0, verify=False)
+                ms = int((time.time() - t0) * 1000)
                 if resp.status_code in [200, 204]:
+                    log_success(f"Heartbeat OK: {url} -> HTTP {resp.status_code} ({ms}ms)")
                     return True
                 # If server replied with 401/403 or 404, server is alive online
                 if resp.status_code in [401, 403, 404, 405]:
+                    log_info(f"Server alive: {url} -> HTTP {resp.status_code} ({ms}ms)")
                     return True
             except requests.RequestException:
                 continue
+        log_warn(f"Cloud server offline or unreachable at {base_url}")
         return False
 
     def push_invoices_batch(self, base_url: str, headers: Dict[str, str], terminal_id: str) -> Tuple[int, List[str]]:
@@ -144,6 +150,7 @@ class SyncWorker(QThread):
         if not pending:
             return (0, [])
 
+        log_step("Pushing Offline Invoices", f"Preparing batch of {len(pending)} bill(s) for {base_url}...")
         # Format payload following the architecture plan
         payload = {
             "terminal_id": terminal_id,
@@ -193,15 +200,20 @@ class SyncWorker(QThread):
         synced_bills = []
         for ep in endpoints:
             try:
+                t0 = time.time()
                 resp = requests.post(ep, json=payload, headers=headers, timeout=8.0, verify=False)
+                ms = int((time.time() - t0) * 1000)
                 if resp.status_code in [200, 201]:
                     data = resp.json() if resp.content else {}
                     # If backend returns synced uuids or list of IDs
                     synced_ids = data.get("synced_uuids") or [inv["bill_no"] for inv in pending]
                     self.db.mark_invoices_synced(synced_ids)
+                    log_success(f"Pushed {len(synced_ids)} bills to {ep} ({ms}ms) -> Synced UUIDs: {synced_ids}")
                     return (len(synced_ids), synced_ids)
+                else:
+                    log_warn(f"Push to {ep} returned HTTP {resp.status_code}: {resp.text[:120]}")
             except requests.RequestException as e:
-                print(f"[SyncWorker] Invoice push error at {ep}: {e}")
+                log_error(f"Invoice push error at {ep}", e)
                 continue
 
         return (0, [])
@@ -215,9 +227,12 @@ class SyncWorker(QThread):
             f"{alt_base}/pos/users",
             f"{alt_base}/users"
         ]
+        log_step("Syncing Staff Users", f"Querying active staff endpoints from {base_url}...")
         for ep in endpoints:
             try:
+                t0 = time.time()
                 resp = requests.get(ep, headers=headers, timeout=6.0, verify=False)
+                ms = int((time.time() - t0) * 1000)
                 if resp.status_code == 200:
                     data = resp.json()
                     users = []
@@ -226,11 +241,22 @@ class SyncWorker(QThread):
                     elif isinstance(data, dict):
                         users = data.get("users") or data.get("data") or []
                     if users and self.db:
-                        count = self.db.upsert_users(users)
+                        count = self.db.upsert_users(users, replace=True)
+                        log_success(f"Staff sync successful: {count} user(s) synced from {ep} ({ms}ms)")
                         return count
+                elif resp.status_code in [401, 403]:
+                    log_error(f"Unauthorized at {ep} (HTTP {resp.status_code}): Invalid or missing FASTPOS_TOKEN")
+                elif resp.status_code == 404:
+                    log_warn(f"Staff endpoint {ep} returned HTTP 404 (Not Found on cloud server)")
+                else:
+                    log_warn(f"Staff endpoint {ep} returned HTTP {resp.status_code}")
             except requests.RequestException as e:
-                print(f"[SyncWorker] Users pull error at {ep}: {e}")
+                log_warn(f"Users pull network error at {ep}: {e}")
                 continue
+
+        if self.db:
+            active_u = self.db.get_active_cashier_user()
+            log_info(f"Retaining active cashier: {active_u.get('name', 'Admin')} [{active_u.get('role', 'admin')}]")
         return 0
 
     def sync_product_catalog(self, base_url: str, headers: Dict[str, str]) -> int:
@@ -245,6 +271,7 @@ class SyncWorker(QThread):
             f"{base_url}/pos/products"
         ]
 
+        log_step("Syncing Product Catalog", f"Checking updates from {base_url} (last sync: {last_sync or 'Initial Full Sync'})...")
         for ep in endpoints:
             try:
                 total_upserted = 0
@@ -253,8 +280,11 @@ class SyncWorker(QThread):
                 while page <= 200:
                     page_params = dict(params)
                     page_params.update({"page": page, "per_page": 500})
+                    t0 = time.time()
                     resp = requests.get(ep, headers=headers, params=page_params, timeout=30.0, verify=False)
+                    ms = int((time.time() - t0) * 1000)
                     if resp.status_code != 200:
+                        log_warn(f"Products endpoint {ep} page {page} returned HTTP {resp.status_code}")
                         break
                     data = resp.json()
                     products = []
@@ -265,7 +295,9 @@ class SyncWorker(QThread):
                         products = data.get("products") or data.get("data") or []
                         has_more = bool(data.get("has_more"))
                     if products:
-                        total_upserted += self.db.upsert_products(products)
+                        upserted = self.db.upsert_products(products)
+                        total_upserted += upserted
+                        log_info(f"Page {page}: Downloaded {len(products)} products, updated {upserted} in SQLite ({ms}ms)")
                     should_continue = has_more or len(products) >= 500
                     if not should_continue:
                         completed = True
@@ -273,12 +305,13 @@ class SyncWorker(QThread):
                     page += 1
                 if page == 1 and not completed:
                     continue  # endpoint failed, try the next one
-                if completed:
+                if completed or total_upserted > 0:
                     now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     self.db.set_setting("last_product_sync", now_str)
-                return total_upserted
+                    log_success(f"Product Catalog Complete! {total_upserted} items synchronized into local cache.")
+                    return total_upserted
             except requests.RequestException as e:
-                print(f"[SyncWorker] Product pull error at {ep}: {e}")
+                log_error(f"Product sync error at {ep}", e)
                 continue
         return 0
 
@@ -378,10 +411,14 @@ class SyncWorker(QThread):
         total_upserted = 0
         total_amount = 0.0
 
+        log_step("Syncing Domain Sales", f"Fetching receipts for target date '{target_date}' from {base_url}...")
         for ep in candidate_urls:
             try:
+                t0 = time.time()
                 resp = requests.get(ep, headers=headers, timeout=6.0, verify=False)
+                ms = int((time.time() - t0) * 1000)
                 if resp.status_code != 200:
+                    log_warn(f"Sales endpoint {ep} returned HTTP {resp.status_code} ({ms}ms)")
                     continue
 
                 data = resp.json()
@@ -578,10 +615,12 @@ class SyncWorker(QThread):
         worker = SyncWorker(None)
         base_url = worker.build_base_url(tenant, base_domain)
         headers = worker.get_headers(token, terminal)
+        log_step("Testing Server Connection", f"Target: {base_url} | Token: {'[Configured]' if token else '[Empty]'}")
 
         # 1. Ping
         health_ok = worker.check_health(base_url, headers)
         if not health_ok:
+            log_error(f"Cannot reach server at {base_url}. Network timeout or server down.")
             return {
                 "success": False,
                 "message": f"Unable to reach server at {base_url}. Check connection or domain name."
@@ -589,14 +628,18 @@ class SyncWorker(QThread):
 
         # 2. Verify token / tenant endpoint
         verify_endpoints = [
-            f"{base_url}/pos/settings/verify",
             f"{base_url}/pos/health",
-            f"{base_url}/ping"
+            f"{base_url}/ping",
+            f"{base_url}/pos/settings/verify"
         ]
         for ep in verify_endpoints:
             try:
+                t0 = time.time()
                 res = requests.get(ep, headers=headers, timeout=5.0, verify=False)
+                ms = int((time.time() - t0) * 1000)
+                log_info(f"Test probe: {ep} -> HTTP {res.status_code} ({ms}ms)")
                 if res.status_code in [200, 204]:
+                    log_success(f"Connection Successful! Connected to {base_url} (HTTP {res.status_code})")
                     return {
                         "success": True,
                         "base_url": base_url,
@@ -610,13 +653,16 @@ class SyncWorker(QThread):
                         err_msg = None
                     if not err_msg:
                         err_msg = f"FastPOS Access Token was rejected (HTTP {res.status_code}). Please verify FASTPOS_TOKEN in your system .env."
+                    log_error(f"Token rejected at {ep}: {err_msg}")
                     return {
                         "success": False,
                         "message": err_msg
                     }
-            except Exception:
+            except Exception as e:
+                log_warn(f"Test probe error at {ep}: {e}")
                 continue
 
+        log_success(f"Server reached successfully at {base_url}")
         return {
             "success": True,
             "base_url": base_url,
