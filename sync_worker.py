@@ -206,10 +206,17 @@ class SyncWorker(QThread):
                 if resp.status_code in [200, 201]:
                     data = resp.json() if resp.content else {}
                     # If backend returns synced uuids or list of IDs
-                    synced_ids = data.get("synced_uuids") or [inv["bill_no"] for inv in pending]
-                    self.db.mark_invoices_synced(synced_ids)
-                    log_success(f"Pushed {len(synced_ids)} bills to {ep} ({ms}ms) -> Synced UUIDs: {synced_ids}")
-                    return (len(synced_ids), synced_ids)
+                    if "synced_uuids" in data:
+                        synced_ids = data.get("synced_uuids") or []
+                    else:
+                        synced_ids = [inv["bill_no"] for inv in pending]
+
+                    if synced_ids:
+                        self.db.mark_invoices_synced(synced_ids)
+                        log_success(f"Pushed {len(synced_ids)} bills to {ep} ({ms}ms) -> Synced UUIDs: {synced_ids}")
+                        return (len(synced_ids), synced_ids)
+                    else:
+                        log_warn(f"Server responded at {ep} ({ms}ms) but 0 invoices were confirmed as synced: {data.get('message', 'No synced UUIDs returned')}")
                 else:
                     log_warn(f"Push to {ep} returned HTTP {resp.status_code}: {resp.text[:120]}")
             except requests.RequestException as e:
